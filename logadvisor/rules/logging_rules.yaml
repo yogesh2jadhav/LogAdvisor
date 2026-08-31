@@ -1,0 +1,60 @@
+# AI-Ready Logging Advisor - deterministic logging contract.
+# version is part of the LLM cache key; bump it when semantics change.
+version: "1"
+
+rules:
+  job.start:
+    priority: high
+    spark_ops: [JOB_START]
+    fields: [run_id, job_name, start_time, spark_app_id]
+  job.completion:
+    priority: high
+    spark_ops: []
+    fields: [run_id, job_name, status, duration]
+
+  input:
+    priority: high
+    spark_ops: [DATASET_READ, PARQUET_READ]
+    fields: [run_id, source, dataset, format, record_count, schema_identifier]
+  output:
+    priority: high
+    spark_ops: [DATASET_WRITE, PARQUET_WRITE]
+    fields: [run_id, processing_name, output_dataset, output_path, record_count, file_count, duration, status]
+
+  join:
+    priority: high
+    spark_ops: [JOIN]
+    fields: [run_id, left_count, right_count, output_count, join_type, join_key_identifier, unmatched_count, duration]
+  filter:
+    priority: medium
+    spark_ops: [FILTER]
+    fields: [run_id, records_before, records_after, records_removed, filter_name]
+  aggregation:
+    priority: high
+    spark_ops: [GROUP_BY, AGGREGATION]
+    fields: [run_id, input_count, group_count, output_count, aggregation_name, duration]
+  deduplication:
+    priority: high
+    spark_ops: [DEDUPLICATION]
+    fields: [run_id, records_before, records_after, duplicates_removed, dedup_keys_identifier]
+  repartition:
+    priority: low
+    spark_ops: [REPARTITION, SORT, UNION, MAP]
+    fields: [run_id, partition_count, stage_name]
+  action:
+    priority: medium
+    spark_ops: [SPARK_ACTION]
+    fields: [run_id, stage_name, record_count, duration]
+  transformation:
+    priority: low
+    spark_ops: [SELECT, WITH_COLUMN]
+    fields: [run_id, stage_name]
+
+  exception:
+    priority: high
+    spark_ops: []
+    fields: [run_id, job_name, processing_stage, operation, exception_type, error_message, duration]
+
+# how far (in lines) an existing log statement can be from an operation and
+# still be considered "logging around" that operation.
+proximity_lines: 8

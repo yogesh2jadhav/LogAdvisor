@@ -1,0 +1,82 @@
+"""AI-readiness scoring (deterministic - never produced by the LLM).
+
+Category weights (total 100):
+    Job lifecycle          15
+    Input visibility       15
+    Transformation         15
+    Join visibility        15
+    Output visibility      15
+    Exception visibility   10
+    Structured logging     10
+    Trace/run correlation   5
+"""
+from __future__ import annotations
+
+import re
+from typing import Dict, List
+
+from .models import CodeFile, Finding, Scores
+
+_WEIGHTS = {
+    "job_lifecycle": 15,
+    "input_visibility": 15,
+    "transformation_visibility": 15,
+    "join_visibility": 15,
+    "output_visibility": 15,
+    "exception_visibility": 10,
+    "structured_logging": 10,
+    "run_correlation": 5,
+}
+
+# which finding categories feed which score bucket
+_BUCKET = {
+    "job_lifecycle": {"JOB_START"},
+    "input_visibility": {"DATASET_READ", "PARQUET_READ"},
+    "transformation_visibility": {"FILTER", "GROUP_BY", "AGGREGATION", "DEDUPLICATION",
+                                  "MAP", "REPARTITION", "SELECT", "WITH_COLUMN", "SORT", "UNION"},
+    "join_visibility": {"JOIN"},
+    "output_visibility": {"DATASET_WRITE", "PARQUET_WRITE"},
+    "exception_visibility": {"EXCEPTION"},
+}
+
+_RUN_ID_RE = re.compile(r"\b(run[_]?id|correlation[_]?id|trace[_]?id|jobId|job_id)\b", re.IGNORECASE)
+
+
+def _covered(f: Finding) -> bool:
+    """A finding's operation is considered 'covered' when it already has at least
+    PARTIAL-quality logging."""
+    return f.existing_logging and f.logging_quality in ("PARTIAL", "GOOD")
+
+
+def compute_scores(files: List[CodeFile], findings: List[Finding]) -> Scores:
+    scores = Scores()
+
+    for bucket, cats in _BUCKET.items():
+        relevant = [f for f in findings if f.category in cats]
+        weight = _WEIGHTS[bucket]
+        if not relevant:
+            # no such operations in the codebase -> not a gap, award full marks
+            setattr(scores, bucket, float(weight))
+            continue
+        ratio = sum(1 for f in relevant if _covered(f)) / len(relevant)
+        setattr(scores, bucket, round(weight * ratio, 1))
+
+    # structured logging: fraction of all existing logs that are structured
+    all_logs = [s for cf in files for m in cf.methods for s in m.logging_statements]
+    if all_logs:
+        ratio = sum(1 for s in all_logs if s.structured) / len(all_logs)
+        scores.structured_logging = round(_WEIGHTS["structured_logging"] * ratio, 1)
+    else:
+        scores.structured_logging = 0.0
+
+    # run correlation: any log mentioning a run/correlation id
+    if all_logs:
+        has_corr = any(_RUN_ID_RE.search(s.message_pattern) for s in all_logs)
+        scores.run_correlation = float(_WEIGHTS["run_correlation"]) if has_corr else 0.0
+    else:
+        scores.run_correlation = 0.0
+
+    scores.overall_score = round(sum(
+        getattr(scores, k) for k in _WEIGHTS
+    ), 1)
+    return scores
