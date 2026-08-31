@@ -66,8 +66,14 @@ java-log-advisor scan --project ./p --llm-priority high --llm-limit 50
 
 Reports are written to `logging-report/`:
 
-* `logging_advisory_report.md`
-* `logging_advisory_report.json`
+* `logging_advisory_report.md` — human-readable
+* `logging_advisory_report.json` — enriched, UI-ready (schema v1): flat `findings[]`
+  **plus** a full `files → classes → methods` tree with per-method `detected`
+  matrix, spark ops, existing logs, `finding_ids`, and per-file/method
+  readiness + risk rollups, plus the rule contract
+* `logging_advisory_report.html` — self-contained interactive viewer (tree +
+  dashboard + findings table + logging contract). No network / no assets — just
+  open it in a browser.
 
 ### Other commands
 
@@ -156,7 +162,7 @@ logadvisor/
   rules/       logging_rules.yaml + deterministic rule engine
   llm/         ollama client, prompt builder, response validation, cache, analyzer
   db/          SQLite persistence + migrations
-  report/      markdown + json report writers
+  report/      markdown + enriched-json + self-contained HTML viewer; tree.py builds the schema-v1 doc
   models.py    shared dataclasses
   scoring.py   deterministic AI-observability score
   analyzer.py  two-pass orchestration

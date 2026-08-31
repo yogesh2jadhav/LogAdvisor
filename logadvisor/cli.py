@@ -10,7 +10,7 @@ from .analyzer import AdvisorError, run_scan
 from .config import Config
 from .db.database import Database
 from .llm.ollama_client import OllamaClient
-from .report import write_json_report, write_markdown_report
+from .report import write_html_report, write_json_report, write_markdown_report
 
 
 def _log(msg: str) -> None:
@@ -60,6 +60,7 @@ def cmd_scan(args) -> int:
     out_dir = cfg.output["dir"]
     md = write_markdown_report(result, out_dir)
     js = write_json_report(result, out_dir)
+    html = write_html_report(result, out_dir)
 
     print(f"\nProject:            {result.project.project_name}")
     print(f"Files:              {result.files_scanned}")
@@ -80,6 +81,7 @@ def cmd_scan(args) -> int:
     print(f"\nScan id: {scan_id}")
     print(f"Report:  {md}")
     print(f"         {js}")
+    print(f"         {html}   (open in a browser for the tree view)")
     return 0
 
 
