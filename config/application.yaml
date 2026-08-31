@@ -1,0 +1,40 @@
+# AI-Ready Logging Advisor - default configuration.
+# Copy / edit and pass with:  java-log-advisor scan --project ... --config config/application.yaml
+
+scan:
+  ignore_dirs:
+    - .git
+    - target
+    - build
+    - .idea
+    - .vscode
+    - node_modules
+    - .venv
+    - logs
+    - generated
+
+llm:
+  enabled: true
+  provider: ollama
+  host: http://localhost:11434
+  model: qwen3-coder:30b
+  temperature: 0.1
+  timeout_seconds: 120
+  max_retries: 1
+  cache_enabled: true
+  priority: high        # minimum finding priority sent to the LLM (high|medium|low)
+  limit: 0              # 0 == no cap on LLM calls
+
+privacy:
+  allow_external_llm: false
+  scan_patient_data: false
+  mask_secrets: true
+
+database:
+  path: .ai-ready-log-advisor/advisor.db
+
+cache:
+  dir: .ai-ready-log-advisor/cache
+
+output:
+  dir: logging-report
