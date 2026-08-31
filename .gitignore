@@ -1,0 +1,17 @@
+# advisor local data
+.ai-ready-log-advisor/
+*.db
+*.sqlite
+*.sqlite3
+cache/
+logging-report/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+build/
+dist/
