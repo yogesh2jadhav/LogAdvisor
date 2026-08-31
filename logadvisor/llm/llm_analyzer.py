@@ -70,13 +70,16 @@ class LLMAnalyzer:
         )
 
     def analyze(self, project: ProjectInfo, files: List[CodeFile], findings: List[Finding],
-                sources: Dict[str, str], min_priority: str = "high", limit: int = 0) -> None:
+                sources: Dict[str, str], min_priority: str = "high", limit: int = 0,
+                progress: Optional[Callable[[int, int, str], None]] = None) -> None:
+        progress = progress or (lambda d, t, l="": None)
         by_path = {cf.path: cf for cf in files}
         selected = self._select(findings, min_priority, limit)
         self.log(f"LLM analysing {len(selected)} of {len(findings)} findings "
                  f"(min_priority={min_priority}, limit={limit or 'none'})")
 
         for i, finding in enumerate(selected, 1):
+            progress(i, len(selected), "LLM analysis")
             run: dict = {
                 "fingerprint": finding.fingerprint,
                 "provider": getattr(self.client, "name", "ollama"),

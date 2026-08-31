@@ -95,7 +95,8 @@ Reports are written to `logging-report/`:
 | `findings [--priority HIGH]` | list findings from the latest (or `--scan`) run |
 | `finding show <id>` | full detail for one finding: location, rule, required fields, LLM recommendation, run metrics |
 | `finding accept\|reject\|implemented\|false-positive\|reviewed <id>` | update a finding's lifecycle status (carried forward to future scans by fingerprint) |
-| `benchmark --project P --models a,b` | run the LLM pass for several local models and compare reliability / latency / tokens (quality still needs manual review) |
+| `benchmark --project P --models a,b` | run the LLM pass for several local models and compare reliability / latency / tokens |
+| `eval [--model M]` | score a model against the built-in recommendation eval set (fixed Java+Spark snippets with expected priority / AI-usefulness / no-PHI) |
 
 ### Key options
 

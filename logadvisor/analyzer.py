@@ -23,6 +23,11 @@ from .scanner.project_scanner import scan_project
 from .scoring import compute_scores
 
 Logger = Callable[[str], None]
+Progress = Callable[[int, int, str], None]
+
+
+def _noop_progress(done: int, total: int, label: str = "") -> None:
+    pass
 
 
 class AdvisorError(RuntimeError):
@@ -38,9 +43,11 @@ class Pass1:
     scores: Scores
 
 
-def run_pass1(project_path: str, config: Config, log: Optional[Logger] = None) -> Pass1:
+def run_pass1(project_path: str, config: Config, log: Optional[Logger] = None,
+              progress: Optional[Progress] = None) -> Pass1:
     """Deterministic analysis only - no LLM, no persistence."""
     log = log or (lambda m: None)
+    progress = progress or _noop_progress
     project_path = os.path.abspath(project_path)
 
     log("scan_start")
@@ -50,7 +57,8 @@ def run_pass1(project_path: str, config: Config, log: Optional[Logger] = None) -
 
     files: List[CodeFile] = []
     sources: Dict[str, str] = {}
-    for jf in java_files:
+    total = len(java_files)
+    for i, jf in enumerate(java_files, 1):
         try:
             cf = parse_java_file(jf, project_path)
         except Exception as exc:  # never abort the whole scan for one file
@@ -59,6 +67,7 @@ def run_pass1(project_path: str, config: Config, log: Optional[Logger] = None) -
         files.append(cf)
         with open(jf, "r", encoding="utf-8", errors="replace") as fh:
             sources[cf.path] = fh.read()
+        progress(i, total, "scanning")
 
     log(f"parsed {len(files)} files, {sum(len(f.methods) for f in files)} methods")
 
@@ -88,9 +97,11 @@ def check_ollama(config: Config) -> OllamaClient:
 
 
 def run_scan(project_path: str, config: Config, *, use_llm: bool,
-             log: Optional[Logger] = None) -> ScanResult:
+             log: Optional[Logger] = None,
+             progress: Optional[Progress] = None) -> ScanResult:
     log = log or (lambda m: None)
-    p1 = run_pass1(project_path, config, log)
+    progress = progress or _noop_progress
+    p1 = run_pass1(project_path, config, log, progress)
     info, files, sources, findings, scores = (
         p1.project, p1.files, p1.sources, p1.findings, p1.scores)
 
@@ -111,6 +122,7 @@ def run_scan(project_path: str, config: Config, *, use_llm: bool,
         analyzer.analyze(
             info, files, findings, sources,
             min_priority=config.llm["priority"], limit=config.llm["limit"],
+            progress=progress,
         )
         result.llm_enabled = True
         result.llm_calls = analyzer.calls

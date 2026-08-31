@@ -22,6 +22,35 @@ def _quiet(_msg: str) -> None:
     pass
 
 
+class _ProgressBar:
+    """Single-line \\r progress bar on stderr. No-op unless stderr is a TTY."""
+
+    WIDTH = 24
+
+    def __init__(self, enabled: Optional[bool] = None):
+        self.enabled = sys.stderr.isatty() if enabled is None else enabled
+        self._active = False
+
+    def __call__(self, done: int, total: int, label: str = "") -> None:
+        if not self.enabled or total <= 0:
+            return
+        done = min(done, total)
+        filled = int(self.WIDTH * done / total)
+        bar = "█" * filled + "░" * (self.WIDTH - filled)
+        pct = int(100 * done / total)
+        sys.stderr.write(f"\r  {label:<16} {bar} {pct:3d}%  {done}/{total}   ")
+        sys.stderr.flush()
+        self._active = True
+        if done >= total:
+            self.finish()
+
+    def finish(self) -> None:
+        if self.enabled and self._active:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+            self._active = False
+
+
 def _load_config(args) -> Config:
     cfg = Config.load(getattr(args, "config", None))
     cfg.apply_overrides(
@@ -48,11 +77,15 @@ def cmd_scan(args) -> int:
 
     print("AI-Ready Logging Advisor")
     print("────────────────────────")
+    # progress bar only when not in verbose mode (verbose prints its own lines)
+    bar = _ProgressBar(enabled=False if args.verbose else None)
     try:
-        result = run_scan(args.project, cfg, use_llm=use_llm, log=log)
+        result = run_scan(args.project, cfg, use_llm=use_llm, log=log, progress=bar)
     except (AdvisorError, ValueError) as exc:
+        bar.finish()
         print(f"\n{exc}", file=sys.stderr)
         return 2
+    bar.finish()
 
     db = Database(cfg.database["path"])
     scan_id = db.save_scan(result)
@@ -228,6 +261,35 @@ def cmd_benchmark(args) -> int:
     return 0
 
 
+def cmd_eval(args) -> int:
+    from .llm.eval_set import run_eval
+
+    cfg = _load_config(args)
+    model = args.model or cfg.llm["model"]
+    log = _log if args.verbose else _quiet
+    print(f"Evaluating recommendation quality: {model}\n")
+    try:
+        res = run_eval(cfg, model, log=log)
+    except (RuntimeError, ValueError) as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
+
+    print(f"{'CASE':<16}{'CATEGORY':<16}{'RESULT'}")
+    print("-" * 70)
+    for r in res["cases"]:
+        if r["failed"]:
+            verdict = "FAIL — " + ", ".join(r["failed"])
+        elif not r["passed"]:
+            verdict = "no finding detected"
+        else:
+            verdict = f"pass ({len(r['passed'])} checks)"
+        print(f"{r['id']:<16}{r['category']:<16}{verdict}")
+    s = res["summary"]
+    print(f"\nClean cases: {s['clean_cases']}/{s['cases']}   "
+          f"Checks passed: {s['checks_passed']}/{s['checks_run']} ({s['pass_rate']*100:.0f}%)")
+    return 0 if s["clean_cases"] == s["cases"] else 1
+
+
 def cmd_findings(args) -> int:
     cfg = _load_config(args)
     db = Database(cfg.database["path"])
@@ -335,6 +397,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--output")
     add_common(sp)
     sp.set_defaults(func=cmd_report)
+
+    sp = sub.add_parser("eval", help="score a model against the built-in recommendation eval set")
+    sp.add_argument("--verbose", "-v", action="store_true")
+    add_common(sp)
+    sp.set_defaults(func=cmd_eval)
 
     sp = sub.add_parser("benchmark", help="compare local models on one project")
     sp.add_argument("--project", required=True)
