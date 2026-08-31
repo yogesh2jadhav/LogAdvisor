@@ -10,11 +10,13 @@ from __future__ import annotations
 import os
 from typing import Callable, Dict, List, Optional
 
+from dataclasses import dataclass
+
 from .config import Config
 from .llm.cache import LLMCache
 from .llm.llm_analyzer import LLMAnalyzer
 from .llm.ollama_client import OllamaClient, OllamaError
-from .models import CodeFile, ScanResult
+from .models import CodeFile, Finding, ProjectInfo, ScanResult, Scores
 from .rules.rule_engine import RuleEngine
 from .scanner.java_parser import parse_java_file
 from .scanner.project_scanner import scan_project
@@ -27,8 +29,17 @@ class AdvisorError(RuntimeError):
     pass
 
 
-def run_scan(project_path: str, config: Config, *, use_llm: bool,
-             log: Optional[Logger] = None) -> ScanResult:
+@dataclass
+class Pass1:
+    project: ProjectInfo
+    files: List[CodeFile]
+    sources: Dict[str, str]
+    findings: List[Finding]
+    scores: Scores
+
+
+def run_pass1(project_path: str, config: Config, log: Optional[Logger] = None) -> Pass1:
+    """Deterministic analysis only - no LLM, no persistence."""
     log = log or (lambda m: None)
     project_path = os.path.abspath(project_path)
 
@@ -49,15 +60,39 @@ def run_scan(project_path: str, config: Config, *, use_llm: bool,
         with open(jf, "r", encoding="utf-8", errors="replace") as fh:
             sources[cf.path] = fh.read()
 
-    log(f"parsed {len(files)} files, "
-        f"{sum(len(f.methods) for f in files)} methods")
+    log(f"parsed {len(files)} files, {sum(len(f.methods) for f in files)} methods")
 
-    engine = RuleEngine()
-    findings = engine.evaluate(files)
+    findings = RuleEngine().evaluate(files)
     log(f"findings_created {len(findings)}")
-
     scores = compute_scores(files, findings)
     log(f"ai_observability_score {scores.overall_score}")
+    return Pass1(info, files, sources, findings, scores)
+
+
+def check_ollama(config: Config) -> OllamaClient:
+    """Validate the endpoint + model, returning a ready client or raising."""
+    config.validate_llm_endpoint()
+    client = OllamaClient(config.llm["host"], config.llm["timeout_seconds"])
+    if not client.is_available():
+        raise AdvisorError(
+            f"Ollama is not available at {config.llm['host']}.\n\n"
+            "Run the advisor with --no-llm, or start Ollama and retry."
+        )
+    if not client.has_model(config.llm["model"]):
+        raise AdvisorError(
+            f"Model '{config.llm['model']}' not found in Ollama.\n"
+            f"Pull it with:  ollama pull {config.llm['model']}\n"
+            "or pass --model <available-model> / use --no-llm."
+        )
+    return client
+
+
+def run_scan(project_path: str, config: Config, *, use_llm: bool,
+             log: Optional[Logger] = None) -> ScanResult:
+    log = log or (lambda m: None)
+    p1 = run_pass1(project_path, config, log)
+    info, files, sources, findings, scores = (
+        p1.project, p1.files, p1.sources, p1.findings, p1.scores)
 
     result = ScanResult(
         project=info, files=files, findings=findings, scores=scores,
@@ -65,20 +100,7 @@ def run_scan(project_path: str, config: Config, *, use_llm: bool,
     )
 
     if use_llm and config.llm["enabled"]:
-        config.validate_llm_endpoint()
-        client = OllamaClient(config.llm["host"], config.llm["timeout_seconds"])
-        if not client.is_available():
-            raise AdvisorError(
-                "Ollama is not available at "
-                f"{config.llm['host']}.\n\nRun the advisor with --no-llm, "
-                "or start Ollama and retry."
-            )
-        if not client.has_model(config.llm["model"]):
-            raise AdvisorError(
-                f"Model '{config.llm['model']}' not found in Ollama.\n"
-                f"Pull it with:  ollama pull {config.llm['model']}\n"
-                "or pass --model <available-model> / use --no-llm."
-            )
+        client = check_ollama(config)
         cache = LLMCache(config.cache["dir"], config.llm["cache_enabled"])
         analyzer = LLMAnalyzer(
             client, config.llm["model"], cache,
@@ -94,6 +116,7 @@ def run_scan(project_path: str, config: Config, *, use_llm: bool,
         result.llm_calls = analyzer.calls
         result.llm_failures = analyzer.failures
         result.cache_hits = analyzer.cache_hits
+        result.llm_runs = analyzer.runs
         log(f"llm_calls {analyzer.calls} llm_failures {analyzer.failures} "
             f"cache_hits {analyzer.cache_hits}")
 

@@ -175,6 +175,8 @@ class ScanResult:
     llm_calls: int = 0
     llm_failures: int = 0
     cache_hits: int = 0
+    # per-finding LLM execution records (see llm.llm_analyzer.LLMAnalyzer.runs)
+    llm_runs: List[Dict[str, Any]] = field(default_factory=list)
 
     # ---- aggregate counters used by the report -------------------------------
     @property

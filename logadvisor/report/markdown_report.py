@@ -196,6 +196,40 @@ def write_markdown_report(result: ScanResult, out_dir: str) -> str:
         A(f"| {fp} | {c['HIGH']} | {c['MEDIUM']} | {c['LOW']} | {nlogs} |")
     A("")
 
+    A("## Method-Level Summary")
+    A("")
+    A("Highest-risk methods (operations detected vs. observability captured):")
+    A("")
+    finding_methods = {(f.file, f.class_name, f.method) for f in result.findings}
+    ranked_methods = []
+    for cf in result.files:
+        for m in cf.methods:
+            key = (cf.path, m.class_name, m.name)
+            if key not in finding_methods:
+                continue
+            mf = [f for f in result.findings
+                  if f.file == cf.path and f.class_name == m.class_name and f.method == m.name]
+            weight = sum({"HIGH": 3, "MEDIUM": 2, "LOW": 1}[f.priority] for f in mf)
+            ranked_methods.append((weight, cf, m, mf))
+    ranked_methods.sort(key=lambda t: -t[0])
+    op_types = {"input": {"DATASET_READ", "PARQUET_READ"}, "join": {"JOIN"},
+                "filter": {"FILTER"}, "aggregation": {"GROUP_BY", "AGGREGATION"},
+                "output": {"DATASET_WRITE", "PARQUET_WRITE"}}
+    for weight, cf, m, mf in ranked_methods[:20]:
+        present = {op.operation_type for op in m.spark_operations}
+        checks = []
+        for label, cats in op_types.items():
+            if present & cats:
+                checks.append(f"✓ {label}")
+        checks.append(("✓" if any(s.structured for s in m.logging_statements) else "✗") + " structured logging")
+        checks.append(("✓" if m.logging_statements else "✗") + " logging")
+        A(f"### `{m.class_name}.{m.name}()` — {cf.path}:{m.start_line}")
+        A("")
+        A(f"- Risk weight: {weight}  ·  findings: "
+          + ", ".join(f"{f.category}@{f.line}" for f in mf))
+        A(f"- {'  '.join(checks)}")
+        A("")
+
     A("## Appendix")
     A("")
     A(f"- Scanner version: see `logadvisor.SCANNER_VERSION`")

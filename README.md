@@ -83,8 +83,11 @@ Reports are written to `logging-report/`:
 | `init` | create the local SQLite database |
 | `history` | list past scans (score / findings / model) |
 | `compare --scan A --scan B` | diff two scans (score + priority counts) |
+| `report [--scan N] [--output DIR]` | regenerate md/json/html reports for a scan **from the database** (no re-scan; defaults to the latest scan) |
 | `findings [--priority HIGH]` | list findings from the latest (or `--scan`) run |
+| `finding show <id>` | full detail for one finding: location, rule, required fields, LLM recommendation, run metrics |
 | `finding accept\|reject\|implemented\|false-positive\|reviewed <id>` | update a finding's lifecycle status (carried forward to future scans by fingerprint) |
+| `benchmark --project P --models a,b` | run the LLM pass for several local models and compare reliability / latency / tokens (quality still needs manual review) |
 
 ### Key options
 
@@ -160,7 +163,7 @@ Test fixture: [`tests/fixtures/sample-spark-project`](tests/fixtures/sample-spar
 logadvisor/
   scanner/     project discovery + Java/Spark/logging/exception detection
   rules/       logging_rules.yaml + deterministic rule engine
-  llm/         ollama client, prompt builder, response validation, cache, analyzer
+  llm/         provider interface, ollama client, prompt builder, response validation, cache, analyzer, benchmark
   db/          SQLite persistence + migrations
   report/      markdown + enriched-json + self-contained HTML viewer; tree.py builds the schema-v1 doc
   models.py    shared dataclasses
