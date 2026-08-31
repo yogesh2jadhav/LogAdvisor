@@ -81,6 +81,7 @@ class LLMAnalyzer:
                 "fingerprint": finding.fingerprint,
                 "provider": getattr(self.client, "name", "ollama"),
                 "model": self.model,
+                "rule_id": finding.rule_id,
                 "started_at": _now(),
                 "cache_hit": 0,
                 "duration_ms": 0,
@@ -88,6 +89,8 @@ class LLMAnalyzer:
                 "output_tokens": 0,
                 "error_type": None,
                 "prompt_hash": None,
+                "cache_key": None,
+                "response_path": None,
             }
             cf = by_path.get(finding.file)
             source = sources.get(finding.file, "")
@@ -102,6 +105,8 @@ class LLMAnalyzer:
             method_code = "".join(source.splitlines(keepends=True)[method.start_line - 1:method.end_line])
             ckey = LLMCache.key(file_hash=cf.file_hash, method_code=method_code + finding.snippet,
                                 rule_id=finding.rule_id, prompt_version=PROMPT_VERSION, model=self.model)
+            run["cache_key"] = ckey
+            run["response_path"] = self.cache.path_for(ckey)
 
             cached = self.cache.get(ckey)
             if cached is not None:

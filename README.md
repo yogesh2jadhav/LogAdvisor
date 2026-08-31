@@ -24,6 +24,14 @@ Static analysis discovers *facts*. The local LLM only explains, prioritises and
 screens recommendations — it is never responsible for parsing, counting or
 scoring. The score is 100% deterministic.
 
+Pass 1 also runs a lightweight **lazy-evaluation analysis**: because Spark
+transformations only run when an action forces them, each `filter` / `join` /
+`groupBy` finding records the line where a Spark action actually materialises it
+(`execution_line`), and the report recommends logging the record-flow metrics
+*at that action*, not at the (lazy) definition site. Methods that start a Spark
+session also get a `JOB_COMPLETION` finding, and a `throws` clause with no
+error logging is flagged.
+
 ## Install
 
 ```bash

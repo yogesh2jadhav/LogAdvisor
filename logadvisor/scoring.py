@@ -30,7 +30,7 @@ _WEIGHTS = {
 
 # which finding categories feed which score bucket
 _BUCKET = {
-    "job_lifecycle": {"JOB_START"},
+    "job_lifecycle": {"JOB_START", "JOB_COMPLETION"},
     "input_visibility": {"DATASET_READ", "PARQUET_READ"},
     "transformation_visibility": {"FILTER", "GROUP_BY", "AGGREGATION", "DEDUPLICATION",
                                   "MAP", "REPARTITION", "SELECT", "WITH_COLUMN", "SORT", "UNION"},

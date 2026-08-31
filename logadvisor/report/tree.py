@@ -109,7 +109,9 @@ def build_report_document(result: ScanResult) -> dict:
                 "ai_readiness": readiness_for(m_findings),
                 "detected": _detected(method),
                 "spark_operations": [
-                    {"type": op.operation_type, "line": op.line, "priority": op.priority}
+                    {"type": op.operation_type, "line": op.line, "priority": op.priority,
+                     "lazy": op.lazy, "is_action": op.is_action,
+                     "materialized_at": op.materialized_at}
                     for op in method.spark_operations
                 ],
                 "existing_logs": [

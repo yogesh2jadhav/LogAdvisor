@@ -13,7 +13,8 @@ import os
 import re
 from typing import List, Optional, Tuple
 
-from ..models import CodeFile, Method
+from ..models import CodeFile, ExceptionBoundary, Method
+from .dataflow import annotate as annotate_dataflow
 from .exception_detector import detect_exceptions
 from .logging_detector import detect_logging
 from .spark_detector import detect_spark_operations
@@ -189,9 +190,10 @@ def parse_java_file(path: str, project_root: str) -> CodeFile:
         paren_close = _match_paren(masked, paren_open)
         # after params: optional 'throws ...' then '{' (definition) — skip ';' (abstract)
         after = masked[paren_close + 1:paren_close + 400]
-        am = re.match(r"\s*(?:throws\s+[\w.,\s]+?)?\s*\{", after)
+        am = re.match(r"\s*(?:throws\s+([\w.,\s]+?))?\s*\{", after)
         if not am:
             continue
+        throws_clause = (am.group(1) or "").strip()
         brace_open = paren_close + 1 + after.index("{", am.start())
         # crude signature sanity: token before name should look like a type/modifier
         before = masked[max(0, hint.start() - 120):hint.start()].strip()
@@ -234,6 +236,15 @@ def parse_java_file(path: str, project_root: str) -> CodeFile:
         method.spark_operations = detect_spark_operations(body, masked_body, start_line)
         method.logging_statements = detect_logging(body, masked_body, start_line)
         method.exception_boundaries = detect_exceptions(body, masked_body, start_line)
+
+        if throws_clause:
+            has_err = any(ls.level in ("ERROR", "WARN") for ls in method.logging_statements) \
+                or any(eb.has_error_logging for eb in method.exception_boundaries)
+            method.exception_boundaries.append(
+                ExceptionBoundary("THROWS", start_line, start_line, has_err)
+            )
+
+        annotate_dataflow(method, masked_body)
         cf.methods.append(method)
 
     cf.methods.sort(key=lambda x: x.start_line)

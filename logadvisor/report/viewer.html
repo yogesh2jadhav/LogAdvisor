@@ -240,6 +240,7 @@
         <span class="pill LOW">${esc(f.status)}</span>
       </h3>
       <div class="loc">${esc(f.file)}:${f.line} · <code>${esc(f.class_name)}.${esc(f.method)}</code> · rule <code>${esc(f.rule_id)}</code></div>
+      ${f.execution_line&&f.execution_line!==f.line?`<div class="warn">⚡ lazy transformation — executes at line ${f.execution_line}; log its metrics at that Spark action</div>`:""}
       ${r.reason?`<p class="reason">${esc(r.reason)}</p>`:""}
       <div class="muted">Recommended structured fields</div>
       <div class="fields">${(r.recommended_fields||f.required_fields||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join("")||'<span class="muted">—</span>'}</div>
@@ -270,8 +271,11 @@
         </div>
       </div>
       ${m.spark_operations&&m.spark_operations.length?`<div class="card"><h3>Spark operations</h3>
-        <table><tr><th>Type</th><th>Line</th><th>Priority</th></tr>
-        ${m.spark_operations.map(o=>`<tr><td>${esc(o.type)}</td><td>${o.line}</td><td><span class="pill ${o.priority}">${o.priority}</span></td></tr>`).join("")}</table></div>`:""}
+        <table><tr><th>Type</th><th>Line</th><th>Priority</th><th>Executes at</th></tr>
+        ${m.spark_operations.map(o=>`<tr><td>${esc(o.type)}</td><td>${o.line}</td>
+          <td><span class="pill ${o.priority}">${o.priority}</span></td>
+          <td class="muted">${o.is_action?"action (here)":o.materialized_at&&o.materialized_at!==o.line?("line "+o.materialized_at):o.lazy&&!o.materialized_at?"<span class='warn'>not materialized here</span>":"—"}</td></tr>`).join("")}</table>
+        <div class="muted" style="margin-top:6px">Spark is lazy — log a transformation's record-flow metrics at the action that runs it.</div></div>`:""}
       ${m.existing_logs&&m.existing_logs.length?`<div class="card"><h3>Existing logging</h3>
         <table><tr><th>Level</th><th>Line</th><th>Structured</th><th>Flag</th></tr>
         ${m.existing_logs.map(l=>`<tr><td>${esc(l.level)}</td><td>${l.line}</td><td>${l.structured?"yes":"<span class='muted'>no</span>"}</td><td>${l.sensitive?"<span class='warn'>sensitive?</span>":""}</td></tr>`).join("")}</table></div>`:""}

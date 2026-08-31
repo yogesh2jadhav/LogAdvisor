@@ -24,6 +24,14 @@ def _finding_block(idx: int, f: Finding) -> str:
         f"- **Rule:** `{f.rule_id}`",
         f"- **LLM analysis:** {f.llm_status}",
     ]
+    if f.execution_line and f.execution_line != f.line:
+        lines.append(f"- **Executes at:** line {f.execution_line} "
+                     f"(lazy transformation — log its metrics at the Spark action, not line {f.line})")
+    elif f.execution_line is None and f.category not in (
+            "EXCEPTION", "JOB_START", "JOB_COMPLETION", "DATASET_READ", "PARQUET_READ",
+            "DATASET_WRITE", "PARQUET_WRITE", "SPARK_ACTION"):
+        lines.append("- **Executes at:** no Spark action found in this method — "
+                     "verify this transformation is materialized elsewhere")
     fields = rec.recommended_fields if rec else f.required_fields
     lines.append("- **Recommended structured fields:**")
     for x in fields:
@@ -137,6 +145,37 @@ def write_markdown_report(result: ScanResult, out_dir: str) -> str:
     op_counts = Counter(op.operation_type for cf in result.files for m in cf.methods for op in m.spark_operations)
     for op, n in op_counts.most_common():
         A(f"- {op}: {n}")
+    A("")
+
+    A("## Spark Execution Boundaries")
+    A("")
+    A("Spark is lazily evaluated — transformations only run when an action forces "
+      "them. Log record-flow metrics **at the action**, carrying the transformation's "
+      "counts through.")
+    A("")
+    boundaries = [
+        (cf.path, m, op)
+        for cf in result.files for m in cf.methods for op in m.spark_operations
+        if op.lazy and op.materialized_at and op.materialized_at != op.line
+    ]
+    if boundaries:
+        A("| Transformation | Defined | Executes at |")
+        A("| --- | ---: | ---: |")
+        for pth, m, op in boundaries[:40]:
+            A(f"| {op.operation_type} in `{m.class_name}.{m.name}` | {pth}:{op.line} | line {op.materialized_at} |")
+    else:
+        A("_No deferred transformation/action pairs detected._")
+    orphans = [
+        (cf.path, m, op)
+        for cf in result.files for m in cf.methods for op in m.spark_operations
+        if op.lazy and op.materialized_at is None and op.operation_type not in ("SELECT", "WITH_COLUMN")
+    ]
+    if orphans:
+        A("")
+        A(f"⚠️  {len(orphans)} transformation(s) with no Spark action in the same method "
+          "— confirm they are materialized downstream:")
+        for pth, m, op in orphans[:20]:
+            A(f"- {op.operation_type} at {pth}:{op.line} in `{m.class_name}.{m.name}`")
     A("")
 
     A("## Parquet Output Analysis")

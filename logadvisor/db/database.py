@@ -12,7 +12,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from .. import RULE_VERSION, SCANNER_VERSION
+from .. import PROMPT_VERSION, RULE_VERSION, SCANNER_VERSION
 from ..models import (
     CodeFile, ExceptionBoundary, Finding, LoggingStatement, Method, ProjectInfo,
     Recommendation, ScanResult, Scores, SparkOperation,
@@ -133,9 +133,10 @@ class Database:
                 method_index[cf.path].append((m.class_name, m.name, m.start_line, m.end_line, mid))
                 for op in m.spark_operations:
                     c.execute(
-                        "INSERT INTO spark_operations(method_id, operation_type, line, details, priority) "
-                        "VALUES (?,?,?,?,?)",
-                        (mid, op.operation_type, op.line, op.snippet[:200], op.priority),
+                        "INSERT INTO spark_operations(method_id, operation_type, line, details, "
+                        "priority, is_action, lazy, materialized_at) VALUES (?,?,?,?,?,?,?,?)",
+                        (mid, op.operation_type, op.line, op.snippet[:200], op.priority,
+                         int(op.is_action), int(op.lazy), op.materialized_at),
                     )
                 for lg in m.logging_statements:
                     c.execute(
@@ -161,11 +162,11 @@ class Database:
         for f in result.findings:
             fid = c.execute(
                 "INSERT INTO findings(scan_id, source_file_id, method_id, fingerprint, category, "
-                "operation, class_name, method_name, snippet, line, priority, existing_logging, "
-                "logging_quality, required_fields, rule_id, llm_status, status) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "operation, class_name, method_name, snippet, line, execution_line, priority, "
+                "existing_logging, logging_quality, required_fields, rule_id, llm_status, status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (scan_id, file_ids.get(f.file), _method_id_for(f), f.fingerprint, f.category,
-                 f.category, f.class_name, f.method, f.snippet, f.line, f.priority,
+                 f.category, f.class_name, f.method, f.snippet, f.line, f.execution_line, f.priority,
                  int(f.existing_logging), f.logging_quality, json.dumps(f.required_fields),
                  f.rule_id, f.llm_status, self._carry_status(pid, f.fingerprint)),
             ).lastrowid
@@ -187,16 +188,26 @@ class Database:
         # fall back to a single status row per finding for --no-llm scans.
         if result.llm_runs:
             for run in result.llm_runs:
+                finding_id = finding_ids.get(run.get("fingerprint", ""))
                 c.execute(
                     "INSERT INTO llm_runs(scan_id, finding_id, provider, model, started_at, "
                     "completed_at, duration_ms, status, input_tokens, output_tokens, cache_hit, "
                     "error_type, prompt_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (scan_id, finding_ids.get(run.get("fingerprint", "")),
+                    (scan_id, finding_id,
                      run.get("provider"), run.get("model"), run.get("started_at"),
                      run.get("completed_at"), run.get("duration_ms", 0), run.get("status"),
                      run.get("input_tokens", 0), run.get("output_tokens", 0),
                      run.get("cache_hit", 0), run.get("error_type"), run.get("prompt_hash")),
                 )
+                if run.get("cache_key"):
+                    c.execute(
+                        "INSERT INTO llm_cache(scan_id, finding_id, cache_key, model, "
+                        "prompt_version, rule_id, response_path, hit, created_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        (scan_id, finding_id, run["cache_key"], run.get("model"),
+                         PROMPT_VERSION, run.get("rule_id"), run.get("response_path"),
+                         int(run.get("cache_hit", 0)), _now()),
+                    )
         elif result.llm_enabled:
             for f in result.findings:
                 c.execute(
@@ -332,7 +343,9 @@ class Database:
                     annotations=json.loads(mrow["annotations"] or "[]"),
                 )
                 m.spark_operations = [
-                    SparkOperation(o["operation_type"], o["line"], o["details"] or "", o["priority"])
+                    SparkOperation(o["operation_type"], o["line"], o["details"] or "", o["priority"],
+                                   is_action=bool(o["is_action"]), lazy=bool(o["lazy"]),
+                                   materialized_at=o["materialized_at"])
                     for o in self.conn.execute(
                         "SELECT * FROM spark_operations WHERE method_id = ? ORDER BY line", (mrow["id"],))
                 ]
@@ -364,6 +377,7 @@ class Database:
                 existing_logging=bool(r["existing_logging"]), logging_quality=r["logging_quality"] or "MISSING",
                 required_fields=json.loads(r["required_fields"] or "[]"), rule_id=r["rule_id"] or "",
                 snippet=r["snippet"] or "", status=r["status"] or "OPEN",
+                execution_line=r["execution_line"],
                 llm_status=r["llm_status"] or "NOT_RUN", fingerprint=r["fingerprint"] or "",
             )
             rec = self.conn.execute(
