@@ -11,10 +11,15 @@ requires-python = ">=3.11"
 dependencies = [
     "PyYAML>=6.0",
     "pydantic>=2.0",
+    "tree-sitter>=0.21",
+    "tree-sitter-java>=0.21",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# tree-sitter is a core dependency now; this extra is kept as a no-op alias
+# for anyone who pinned `pip install ai-ready-log-advisor[treesitter]`.
+treesitter = []
 
 [project.scripts]
 java-log-advisor = "logadvisor.cli:main"

@@ -18,6 +18,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "ignore_dirs": DEFAULT_IGNORE_DIRS,
         "include_globs": [],          # optional extra include patterns
         "exclude_globs": [],
+        "parser": "auto",             # auto | treesitter | regex
     },
     "llm": {
         "enabled": True,
@@ -130,6 +131,8 @@ class Config:
             m["scan"]["include_globs"] = list(overrides["include"])
         if overrides.get("exclude"):
             m["scan"]["ignore_dirs"] = m["scan"]["ignore_dirs"] + list(overrides["exclude"])
+        if overrides.get("parser"):
+            m["scan"]["parser"] = overrides["parser"]
 
     def validate_llm_endpoint(self) -> None:
         """Enforce privacy.allow_external_llm == False -> local host only."""

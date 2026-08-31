@@ -150,10 +150,17 @@ def build_report_document(result: ScanResult) -> dict:
     ))
 
     doc = result.to_dict()  # project / scan_id / summary / llm / scores / findings
+    try:
+        from ..scanner.java_parser import active_backend
+        parser_backend = active_backend()
+    except Exception:
+        parser_backend = "unknown"
+
     doc.update({
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "advisor_version": __version__,
+        "parser_backend": parser_backend,
         "rules": rules,
         "files": files_out,
         "findings": flat_findings,
