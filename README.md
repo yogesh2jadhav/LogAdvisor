@@ -24,6 +24,14 @@ Static analysis discovers *facts*. The local LLM only explains, prioritises and
 screens recommendations — it is never responsible for parsing, counting or
 scoring. The score is 100% deterministic.
 
+Pass 1 also runs a lightweight **lazy-evaluation analysis**: because Spark
+transformations only run when an action forces them, each `filter` / `join` /
+`groupBy` finding records the line where a Spark action actually materialises it
+(`execution_line`), and the report recommends logging the record-flow metrics
+*at that action*, not at the (lazy) definition site. Methods that start a Spark
+session also get a `JOB_COMPLETION` finding, and a `throws` clause with no
+error logging is flagged.
+
 ## Install
 
 ```bash
@@ -66,8 +74,14 @@ java-log-advisor scan --project ./p --llm-priority high --llm-limit 50
 
 Reports are written to `logging-report/`:
 
-* `logging_advisory_report.md`
-* `logging_advisory_report.json`
+* `logging_advisory_report.md` — human-readable
+* `logging_advisory_report.json` — enriched, UI-ready (schema v1): flat `findings[]`
+  **plus** a full `files → classes → methods` tree with per-method `detected`
+  matrix, spark ops, existing logs, `finding_ids`, and per-file/method
+  readiness + risk rollups, plus the rule contract
+* `logging_advisory_report.html` — self-contained interactive viewer (tree +
+  dashboard + findings table + logging contract). No network / no assets — just
+  open it in a browser.
 
 ### Other commands
 
@@ -77,8 +91,12 @@ Reports are written to `logging-report/`:
 | `init` | create the local SQLite database |
 | `history` | list past scans (score / findings / model) |
 | `compare --scan A --scan B` | diff two scans (score + priority counts) |
+| `report [--scan N] [--output DIR]` | regenerate md/json/html reports for a scan **from the database** (no re-scan; defaults to the latest scan) |
 | `findings [--priority HIGH]` | list findings from the latest (or `--scan`) run |
+| `finding show <id>` | full detail for one finding: location, rule, required fields, LLM recommendation, run metrics |
 | `finding accept\|reject\|implemented\|false-positive\|reviewed <id>` | update a finding's lifecycle status (carried forward to future scans by fingerprint) |
+| `benchmark --project P --models a,b` | run the LLM pass for several local models and compare reliability / latency / tokens |
+| `eval [--model M]` | score a model against the built-in recommendation eval set (fixed Java+Spark snippets with expected priority / AI-usefulness / no-PHI) |
 
 ### Key options
 
@@ -154,9 +172,9 @@ Test fixture: [`tests/fixtures/sample-spark-project`](tests/fixtures/sample-spar
 logadvisor/
   scanner/     project discovery + Java/Spark/logging/exception detection
   rules/       logging_rules.yaml + deterministic rule engine
-  llm/         ollama client, prompt builder, response validation, cache, analyzer
+  llm/         provider interface, ollama client, prompt builder, response validation, cache, analyzer, benchmark
   db/          SQLite persistence + migrations
-  report/      markdown + json report writers
+  report/      markdown + enriched-json + self-contained HTML viewer; tree.py builds the schema-v1 doc
   models.py    shared dataclasses
   scoring.py   deterministic AI-observability score
   analyzer.py  two-pass orchestration

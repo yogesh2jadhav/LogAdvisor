@@ -24,6 +24,14 @@ def _finding_block(idx: int, f: Finding) -> str:
         f"- **Rule:** `{f.rule_id}`",
         f"- **LLM analysis:** {f.llm_status}",
     ]
+    if f.execution_line and f.execution_line != f.line:
+        lines.append(f"- **Executes at:** line {f.execution_line} "
+                     f"(lazy transformation — log its metrics at the Spark action, not line {f.line})")
+    elif f.execution_line is None and f.category not in (
+            "EXCEPTION", "JOB_START", "JOB_COMPLETION", "DATASET_READ", "PARQUET_READ",
+            "DATASET_WRITE", "PARQUET_WRITE", "SPARK_ACTION"):
+        lines.append("- **Executes at:** no Spark action found in this method — "
+                     "verify this transformation is materialized elsewhere")
     fields = rec.recommended_fields if rec else f.required_fields
     lines.append("- **Recommended structured fields:**")
     for x in fields:
@@ -139,6 +147,37 @@ def write_markdown_report(result: ScanResult, out_dir: str) -> str:
         A(f"- {op}: {n}")
     A("")
 
+    A("## Spark Execution Boundaries")
+    A("")
+    A("Spark is lazily evaluated — transformations only run when an action forces "
+      "them. Log record-flow metrics **at the action**, carrying the transformation's "
+      "counts through.")
+    A("")
+    boundaries = [
+        (cf.path, m, op)
+        for cf in result.files for m in cf.methods for op in m.spark_operations
+        if op.lazy and op.materialized_at and op.materialized_at != op.line
+    ]
+    if boundaries:
+        A("| Transformation | Defined | Executes at |")
+        A("| --- | ---: | ---: |")
+        for pth, m, op in boundaries[:40]:
+            A(f"| {op.operation_type} in `{m.class_name}.{m.name}` | {pth}:{op.line} | line {op.materialized_at} |")
+    else:
+        A("_No deferred transformation/action pairs detected._")
+    orphans = [
+        (cf.path, m, op)
+        for cf in result.files for m in cf.methods for op in m.spark_operations
+        if op.lazy and op.materialized_at is None and op.operation_type not in ("SELECT", "WITH_COLUMN")
+    ]
+    if orphans:
+        A("")
+        A(f"⚠️  {len(orphans)} transformation(s) with no Spark action in the same method "
+          "— confirm they are materialized downstream:")
+        for pth, m, op in orphans[:20]:
+            A(f"- {op.operation_type} at {pth}:{op.line} in `{m.class_name}.{m.name}`")
+    A("")
+
     A("## Parquet Output Analysis")
     A("")
     writes = [f for f in result.findings if f.category in ("DATASET_WRITE", "PARQUET_WRITE")]
@@ -195,6 +234,40 @@ def write_markdown_report(result: ScanResult, out_dir: str) -> str:
         nlogs = sum(len(m.logging_statements) for m in cf.methods) if cf else 0
         A(f"| {fp} | {c['HIGH']} | {c['MEDIUM']} | {c['LOW']} | {nlogs} |")
     A("")
+
+    A("## Method-Level Summary")
+    A("")
+    A("Highest-risk methods (operations detected vs. observability captured):")
+    A("")
+    finding_methods = {(f.file, f.class_name, f.method) for f in result.findings}
+    ranked_methods = []
+    for cf in result.files:
+        for m in cf.methods:
+            key = (cf.path, m.class_name, m.name)
+            if key not in finding_methods:
+                continue
+            mf = [f for f in result.findings
+                  if f.file == cf.path and f.class_name == m.class_name and f.method == m.name]
+            weight = sum({"HIGH": 3, "MEDIUM": 2, "LOW": 1}[f.priority] for f in mf)
+            ranked_methods.append((weight, cf, m, mf))
+    ranked_methods.sort(key=lambda t: -t[0])
+    op_types = {"input": {"DATASET_READ", "PARQUET_READ"}, "join": {"JOIN"},
+                "filter": {"FILTER"}, "aggregation": {"GROUP_BY", "AGGREGATION"},
+                "output": {"DATASET_WRITE", "PARQUET_WRITE"}}
+    for weight, cf, m, mf in ranked_methods[:20]:
+        present = {op.operation_type for op in m.spark_operations}
+        checks = []
+        for label, cats in op_types.items():
+            if present & cats:
+                checks.append(f"✓ {label}")
+        checks.append(("✓" if any(s.structured for s in m.logging_statements) else "✗") + " structured logging")
+        checks.append(("✓" if m.logging_statements else "✗") + " logging")
+        A(f"### `{m.class_name}.{m.name}()` — {cf.path}:{m.start_line}")
+        A("")
+        A(f"- Risk weight: {weight}  ·  findings: "
+          + ", ".join(f"{f.category}@{f.line}" for f in mf))
+        A(f"- {'  '.join(checks)}")
+        A("")
 
     A("## Appendix")
     A("")

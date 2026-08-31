@@ -32,6 +32,10 @@ class LLMCache:
     def _path(self, key: str) -> str:
         return os.path.join(self.dir, f"{key}.json")
 
+    def path_for(self, key: str) -> Optional[str]:
+        """Public: where a given key is / would be stored (None if disabled)."""
+        return self._path(key) if self.enabled else None
+
     def get(self, key: str) -> Optional[dict]:
         if not self.enabled:
             return None

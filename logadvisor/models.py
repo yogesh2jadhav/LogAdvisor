@@ -45,6 +45,12 @@ class SparkOperation:
     line: int
     snippet: str
     priority: str = "LOW"            # HIGH / MEDIUM / LOW (deterministic)
+    # Spark is lazily evaluated: a transformation only runs when an action
+    # forces it. ``materialized_at`` is the line of the action that executes
+    # this transformation (None = no action found in this method).
+    is_action: bool = False
+    lazy: bool = False
+    materialized_at: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -114,6 +120,8 @@ class Finding:
     required_fields: List[str] = field(default_factory=list)
     rule_id: str = ""
     snippet: str = ""
+    # for lazy transformations: the line where a Spark action actually runs it
+    execution_line: Optional[int] = None
     status: str = "OPEN"             # OPEN / REVIEWED / ACCEPTED / REJECTED /
                                      # IMPLEMENTED / FALSE_POSITIVE
     # Populated in pass 2.
@@ -175,6 +183,8 @@ class ScanResult:
     llm_calls: int = 0
     llm_failures: int = 0
     cache_hits: int = 0
+    # per-finding LLM execution records (see llm.llm_analyzer.LLMAnalyzer.runs)
+    llm_runs: List[Dict[str, Any]] = field(default_factory=list)
 
     # ---- aggregate counters used by the report -------------------------------
     @property

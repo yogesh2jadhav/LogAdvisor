@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-Ready Logging Advisory Report</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --panel-2:#f0f2f5; --border:#d9dde3;
+    --text:#1c2128; --muted:#5b6570; --accent:#2563eb;
+    --high:#dc2626; --medium:#d97706; --low:#4b5563; --ok:#16a34a;
+    --chip:#eef1f5;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0d1117; --panel:#161b22; --panel-2:#1c2230; --border:#2b313b;
+      --text:#e6edf3; --muted:#9aa4af; --accent:#4d8bff;
+      --high:#f2555a; --medium:#e0a53f; --low:#9aa4af; --ok:#3fb950;
+      --chip:#232a36;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       background:var(--bg);color:var(--text);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  header{flex:none;padding:18px 22px;background:var(--panel);border-bottom:1px solid var(--border);overflow:auto;max-height:46vh}
+  h1{margin:0 0 4px;font-size:17px}
+  .sub{color:var(--muted);font-size:12px}
+  .kpis{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+  .kpi{background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;min-width:96px}
+  .kpi b{display:block;font-size:18px}
+  .kpi span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .scorewrap{display:flex;gap:22px;align-items:center;margin-top:16px;flex-wrap:wrap}
+  .bigscore{font-size:40px;font-weight:700;line-height:1}
+  .bigscore small{font-size:14px;color:var(--muted);font-weight:400}
+  .bars{flex:1;min-width:260px;display:grid;grid-template-columns:170px 1fr 44px;gap:4px 10px;align-items:center}
+  .bars .lbl{font-size:12px;color:var(--muted)}
+  .bar{background:var(--panel-2);border-radius:5px;height:10px;overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent)}
+  .bars .val{font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+
+  main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(300px,420px) 1fr;gap:0}
+  @media (max-width:820px){main{grid-template-columns:1fr;overflow:auto}}
+  .side{border-right:1px solid var(--border);background:var(--panel);overflow:auto;min-height:0}
+  .detail{overflow:auto;min-height:0;padding:14px 22px 40px}
+  .toolbar{position:sticky;top:0;background:var(--panel);padding:12px;border-bottom:1px solid var(--border);z-index:2}
+  .tabs{position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:2}
+  .toolbar input{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)}
+  .filters{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .filters button, .tabs button{border:1px solid var(--border);background:var(--panel-2);color:var(--text);
+       border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .filters button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .tree{padding:6px 8px 40px}
+  details{margin:1px 0}
+  summary{cursor:pointer;padding:4px 6px;border-radius:6px;list-style:none;display:flex;align-items:center;gap:8px}
+  summary::-webkit-details-marker{display:none}
+  summary:hover{background:var(--panel-2)}
+  .node-file>summary{font-weight:600}
+  .node-cls>summary{color:var(--muted)}
+  .mth{display:flex;align-items:center;gap:8px;padding:4px 6px;margin-left:22px;border-radius:6px;cursor:pointer}
+  .mth:hover{background:var(--panel-2)}
+  .mth.sel{background:var(--accent);color:#fff}
+  .mth.sel .pill{border-color:rgba(255,255,255,.5)}
+  .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pill{font-size:10.5px;padding:1px 6px;border-radius:999px;border:1px solid var(--border);white-space:nowrap}
+  .pill.HIGH{color:#fff;background:var(--high);border-color:var(--high)}
+  .pill.MEDIUM{color:#fff;background:var(--medium);border-color:var(--medium)}
+  .pill.LOW{color:var(--text);background:var(--chip)}
+  .pill.ok{color:#fff;background:var(--ok);border-color:var(--ok)}
+  .rd{font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted);min-width:34px;text-align:right}
+
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  .card h3{margin:0 0 8px;font-size:14px}
+  .matrix{display:flex;flex-wrap:wrap;gap:6px}
+  .m{font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid var(--border);background:var(--panel-2)}
+  .m.yes{border-color:var(--ok);color:var(--ok)}
+  .m.no{color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+  code{background:var(--panel-2);padding:1px 5px;border-radius:4px;font-size:12px}
+  .fields{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0}
+  .tag{background:var(--panel-2);border:1px solid var(--border);border-radius:5px;padding:2px 7px;font-size:11.5px}
+  .tag.danger{border-color:var(--high);color:var(--high)}
+  .reason{color:var(--text);margin:6px 0}
+  .muted{color:var(--muted)}
+  .tabs{display:flex;gap:6px;margin-bottom:14px}
+  .tabs button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .loc{font-size:12px;color:var(--muted)}
+  .warn{color:var(--medium)}
+  .empty{color:var(--muted);padding:30px;text-align:center}
+</style>
+</head>
+<body>
+<script>window.__REPORT__ = /*__REPORT_DATA__*/null;</script>
+<header id="hdr"></header>
+<main>
+  <div class="side">
+    <div class="toolbar">
+      <input id="q" placeholder="Filter files / classes / methods…" autocomplete="off">
+      <div class="filters" id="filters">
+        <button data-f="ALL" class="active">All</button>
+        <button data-f="HIGH">High</button>
+        <button data-f="MEDIUM">Medium</button>
+        <button data-f="LOW">Low</button>
+        <button data-f="UNCOVERED">Only gaps</button>
+      </div>
+    </div>
+    <div class="tree" id="tree"></div>
+  </div>
+  <div class="detail" id="detail">
+    <div class="tabs">
+      <button data-tab="method" class="active">Selection</button>
+      <button data-tab="findings">All findings</button>
+      <button data-tab="contract">Logging contract</button>
+    </div>
+    <div id="view"></div>
+  </div>
+</main>
+<script>
+(function(){
+  const D = window.__REPORT__;
+  const $ = (s,el=document)=>el.querySelector(s);
+  const esc = s => String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const findingById = {};
+  (D.findings||[]).forEach(f=>findingById[f.id]=f);
+
+  let filter = "ALL", query = "", tab = "method", selected = null;
+
+  /* ---------- header ---------- */
+  function renderHeader(){
+    const p=D.project, s=D.summary, sc=D.scores;
+    const cats=[
+      ["Job lifecycle","job_lifecycle",15],["Input visibility","input_visibility",15],
+      ["Transformation","transformation_visibility",15],["Join visibility","join_visibility",15],
+      ["Output visibility","output_visibility",15],["Exception visibility","exception_visibility",10],
+      ["Structured logging","structured_logging",10],["Run correlation","run_correlation",5]];
+    $("#hdr").innerHTML = `
+      <h1>${esc(p.project_name)} — AI-Ready Logging Advisory</h1>
+      <div class="sub">${esc(p.build_system||"?")} · Java ${esc(p.java_version||"?")} · Spark ${esc(p.spark_version||"?")}
+        · ${esc((p.logging_frameworks||[]).join(", ")||"no logging framework")}
+        · scan #${esc(D.scan_id)} · ${esc(D.generated_at||"")}
+        · LLM: ${D.llm && D.llm.enabled ? esc(D.llm.model)+" (calls "+esc(s.llm_calls)+", failures "+esc(s.llm_failures)+", cache "+esc(s.cache_hits)+")" : "disabled"}</div>
+      <div class="kpis">
+        <div class="kpi"><b>${s.files_scanned}</b><span>files</span></div>
+        <div class="kpi"><b>${s.methods_scanned}</b><span>methods</span></div>
+        <div class="kpi"><b>${s.spark_operations}</b><span>spark ops</span></div>
+        <div class="kpi"><b>${s.existing_logs}</b><span>existing logs</span></div>
+        <div class="kpi"><b>${s.findings_count}</b><span>findings</span></div>
+        <div class="kpi"><b style="color:var(--high)">${s.high}</b><span>high</span></div>
+        <div class="kpi"><b style="color:var(--medium)">${s.medium}</b><span>medium</span></div>
+        <div class="kpi"><b style="color:var(--low)">${s.low}</b><span>low</span></div>
+      </div>
+      <div class="scorewrap">
+        <div class="bigscore">${sc.overall_score}<small>/100</small></div>
+        <div class="bars">
+          ${cats.map(([lbl,k,mx])=>`
+            <div class="lbl">${lbl}</div>
+            <div class="bar"><i style="width:${Math.round(100*(sc[k]||0)/mx)}%"></i></div>
+            <div class="val">${sc[k]||0}/${mx}</div>`).join("")}
+        </div>
+      </div>`;
+  }
+
+  /* ---------- tree ---------- */
+  function methodMatchesFilter(m){
+    if(query){
+      const hay=(m.class_name+"."+m.name).toLowerCase();
+      if(!hay.includes(query)) return false;
+    }
+    const fs=(m.finding_ids||[]).map(id=>findingById[id]).filter(Boolean);
+    if(filter==="ALL") return true;
+    if(filter==="UNCOVERED") return fs.some(f=>!isCovered(f));
+    return fs.some(f=>f.priority===filter);
+  }
+  function isCovered(f){ return f.existing_logging && (f.logging_quality==="PARTIAL"||f.logging_quality==="GOOD"); }
+
+  function fileMatchesQuery(f){
+    if(!query) return true;
+    if(f.path.toLowerCase().includes(query)) return true;
+    return f.classes.some(c=>c.methods.some(m=>(m.class_name+"."+m.name).toLowerCase().includes(query)));
+  }
+
+  function renderTree(){
+    const host=$("#tree"); host.innerHTML="";
+    let shown=0;
+    (D.files||[]).forEach(f=>{
+      if(!fileMatchesQuery(f)) return;
+      const methods=[];
+      f.classes.forEach(c=>c.methods.forEach(m=>{ if(methodMatchesFilter(m)) methods.push([c,m]); }));
+      if(!methods.length && filter!=="ALL") return;
+      shown++;
+      const det=document.createElement("details");
+      det.className="node-file"; det.open = shown<=6;
+      const c=f.counts;
+      det.innerHTML=`<summary>
+          <span class="grow">${esc(f.path)}</span>
+          ${c.HIGH?`<span class="pill HIGH">${c.HIGH}</span>`:""}
+          ${c.MEDIUM?`<span class="pill MEDIUM">${c.MEDIUM}</span>`:""}
+          ${c.LOW?`<span class="pill LOW">${c.LOW}</span>`:""}
+          <span class="rd">${f.ai_readiness}</span>
+        </summary>`;
+      const byCls={};
+      methods.forEach(([c,m])=>{ (byCls[c.name]=byCls[c.name]||[]).push(m); });
+      Object.keys(byCls).forEach(cn=>{
+        const cd=document.createElement("details"); cd.className="node-cls"; cd.open=true;
+        cd.innerHTML=`<summary><span class="grow">class ${esc(cn)}</span></summary>`;
+        byCls[cn].forEach(m=>{
+          const row=document.createElement("div");
+          row.className="mth"; row.dataset.key=f.path+"#"+m.class_name+"#"+m.name+"#"+m.start_line;
+          const nf=(m.finding_ids||[]).length;
+          row.innerHTML=`<span class="grow">${esc(m.name)}() <span class="loc">:${m.start_line}</span></span>
+            ${nf?`<span class="pill ${m.risk}">${nf}</span>`:`<span class="pill ok">ok</span>`}
+            <span class="rd">${m.ai_readiness}</span>`;
+          row.onclick=()=>selectMethod(f,m,row);
+          cd.appendChild(row);
+        });
+        det.appendChild(cd);
+      });
+      host.appendChild(det);
+    });
+    if(!shown) host.innerHTML=`<div class="empty">Nothing matches the current filter.</div>`;
+  }
+
+  /* ---------- detail views ---------- */
+  function selectMethod(file,m,row){
+    selected={file,m};
+    document.querySelectorAll(".mth.sel").forEach(e=>e.classList.remove("sel"));
+    if(row) row.classList.add("sel");
+    tab="method"; syncTabs(); renderView();
+  }
+
+  function findingCard(f){
+    const r=f.recommendation||{};
+    const cov=isCovered(f);
+    return `<div class="card">
+      <h3>#${f.id} · ${esc(f.category)}
+        <span class="pill ${f.priority}">${f.priority}</span>
+        ${cov?`<span class="pill ok">covered</span>`:`<span class="pill LOW">${esc(f.logging_quality)}</span>`}
+        <span class="pill LOW">${esc(f.llm_status)}</span>
+        <span class="pill LOW">${esc(f.status)}</span>
+      </h3>
+      <div class="loc">${esc(f.file)}:${f.line} · <code>${esc(f.class_name)}.${esc(f.method)}</code> · rule <code>${esc(f.rule_id)}</code></div>
+      ${f.execution_line&&f.execution_line!==f.line?`<div class="warn">⚡ lazy transformation — executes at line ${f.execution_line}; log its metrics at that Spark action</div>`:""}
+      ${r.reason?`<p class="reason">${esc(r.reason)}</p>`:""}
+      <div class="muted">Recommended structured fields</div>
+      <div class="fields">${(r.recommended_fields||f.required_fields||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join("")||'<span class="muted">—</span>'}</div>
+      ${r.do_not_log&&r.do_not_log.length?`<div class="muted">Do NOT log</div>
+        <div class="fields">${r.do_not_log.map(x=>`<span class="tag danger">${esc(x)}</span>`).join("")}</div>`:""}
+      ${r.capture_strategy||r.performance_note?`<div class="muted">How to capture</div>
+        <p class="reason">${esc(r.capture_strategy||"")} ${r.performance_note?`<span class="warn">${esc(r.performance_note)}</span>`:""}</p>`:""}
+      ${r.ai_usefulness?`<div class="muted">AI value: <b>${esc(r.ai_usefulness)}</b> ${(r.ai_use_cases||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join(" ")}</div>`:""}
+    </div>`;
+  }
+
+  function renderMethodView(){
+    if(!selected){ $("#view").innerHTML=`<div class="empty">Select a method in the tree to see its findings.</div>`; return; }
+    const {file,m}=selected;
+    const d=m.detected||{};
+    const matrix=[["input","Input read"],["join","Join"],["filter","Filter"],["aggregation","Aggregation"],
+      ["output","Output write"],["structured_logging","Structured logging"],
+      ["exception_context","Exception context"],["run_correlation","Run correlation"]];
+    const fs=(m.finding_ids||[]).map(id=>findingById[id]).filter(Boolean);
+    $("#view").innerHTML=`
+      <div class="card">
+        <h3>${esc(m.class_name)}.${esc(m.name)}()
+          <span class="pill ${m.risk}">${m.risk}</span>
+          <span class="rd">readiness ${m.ai_readiness}/100</span></h3>
+        <div class="loc">${esc(file.path)} · lines ${m.start_line}–${m.end_line} · returns <code>${esc(m.return_type)}</code></div>
+        <div class="matrix" style="margin-top:10px">
+          ${matrix.map(([k,l])=>`<span class="m ${d[k]?"yes":"no"}">${d[k]?"✓":"✗"} ${l}</span>`).join("")}
+        </div>
+      </div>
+      ${m.spark_operations&&m.spark_operations.length?`<div class="card"><h3>Spark operations</h3>
+        <table><tr><th>Type</th><th>Line</th><th>Priority</th><th>Executes at</th></tr>
+        ${m.spark_operations.map(o=>`<tr><td>${esc(o.type)}</td><td>${o.line}</td>
+          <td><span class="pill ${o.priority}">${o.priority}</span></td>
+          <td class="muted">${o.is_action?"action (here)":o.materialized_at&&o.materialized_at!==o.line?("line "+o.materialized_at):o.lazy&&!o.materialized_at?"<span class='warn'>not materialized here</span>":"—"}</td></tr>`).join("")}</table>
+        <div class="muted" style="margin-top:6px">Spark is lazy — log a transformation's record-flow metrics at the action that runs it.</div></div>`:""}
+      ${m.existing_logs&&m.existing_logs.length?`<div class="card"><h3>Existing logging</h3>
+        <table><tr><th>Level</th><th>Line</th><th>Structured</th><th>Flag</th></tr>
+        ${m.existing_logs.map(l=>`<tr><td>${esc(l.level)}</td><td>${l.line}</td><td>${l.structured?"yes":"<span class='muted'>no</span>"}</td><td>${l.sensitive?"<span class='warn'>sensitive?</span>":""}</td></tr>`).join("")}</table></div>`:""}
+      <h3 style="margin:18px 0 8px">Findings (${fs.length})</h3>
+      ${fs.length?fs.map(findingCard).join(""):`<div class="empty">No findings — this method's operations are already covered.</div>`}`;
+  }
+
+  function renderFindingsView(){
+    let list=(D.findings||[]).slice();
+    if(filter==="HIGH"||filter==="MEDIUM"||filter==="LOW") list=list.filter(f=>f.priority===filter);
+    if(filter==="UNCOVERED") list=list.filter(f=>!isCovered(f));
+    if(query) list=list.filter(f=>(f.file+f.class_name+f.method+f.category).toLowerCase().includes(query));
+    $("#view").innerHTML=`
+      <div class="card"><h3>All findings (${list.length})</h3>
+      <table>
+        <tr><th>#</th><th>Prio</th><th>Category</th><th>Location</th><th>Logging</th><th>LLM</th><th>Status</th></tr>
+        ${list.map(f=>`<tr>
+          <td>${f.id}</td>
+          <td><span class="pill ${f.priority}">${f.priority}</span></td>
+          <td>${esc(f.category)}</td>
+          <td class="loc">${esc(f.file)}:${f.line}<br><code>${esc(f.class_name)}.${esc(f.method)}</code></td>
+          <td>${isCovered(f)?"<span class='pill ok'>covered</span>":esc(f.logging_quality)}</td>
+          <td>${esc(f.llm_status)}</td>
+          <td>${esc(f.status)}</td>
+        </tr>
+        <tr><td></td><td colspan="6">${findingDetailRow(f)}</td></tr>`).join("")}
+      </table></div>`;
+  }
+  function findingDetailRow(f){
+    const r=f.recommendation||{};
+    return `<div class="fields">${(r.recommended_fields||f.required_fields||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join("")}</div>
+      ${r.reason?`<div class="muted">${esc(r.reason)}</div>`:""}`;
+  }
+
+  function renderContractView(){
+    const rules=D.rules||{};
+    $("#view").innerHTML=`<div class="card"><h3>Recommended logging contract</h3>
+      <div class="muted">From <code>logadvisor/rules/logging_rules.yaml</code> — configurable.</div>
+      <table><tr><th>Rule</th><th>Priority</th><th>Spark ops</th><th>Required fields</th></tr>
+      ${Object.keys(rules).map(k=>`<tr>
+        <td><code>${esc(k)}</code></td>
+        <td><span class="pill ${rules[k].priority}">${esc(rules[k].priority)}</span></td>
+        <td class="muted">${(rules[k].spark_ops||[]).map(esc).join(", ")||"—"}</td>
+        <td>${(rules[k].fields||[]).map(x=>`<span class="tag">${esc(x)}</span>`).join(" ")}</td>
+      </tr>`).join("")}
+      </table></div>`;
+  }
+
+  function renderView(){
+    if(tab==="method") renderMethodView();
+    else if(tab==="findings") renderFindingsView();
+    else renderContractView();
+  }
+  function syncTabs(){ document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("active",b.dataset.tab===tab)); }
+
+  /* ---------- wiring ---------- */
+  $("#q").addEventListener("input",e=>{ query=e.target.value.trim().toLowerCase(); renderTree(); if(tab!=="method") renderView(); });
+  $("#filters").addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    filter=b.dataset.f;
+    document.querySelectorAll("#filters button").forEach(x=>x.classList.toggle("active",x===b));
+    renderTree(); if(tab!=="method") renderView();
+  });
+  document.querySelector(".tabs").addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    tab=b.dataset.tab; syncTabs(); renderView();
+  });
+
+  renderHeader(); renderTree(); renderView();
+})();
+</script>
+</body>
+</html>

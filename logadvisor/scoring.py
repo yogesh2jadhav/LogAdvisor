@@ -30,7 +30,7 @@ _WEIGHTS = {
 
 # which finding categories feed which score bucket
 _BUCKET = {
-    "job_lifecycle": {"JOB_START"},
+    "job_lifecycle": {"JOB_START", "JOB_COMPLETION"},
     "input_visibility": {"DATASET_READ", "PARQUET_READ"},
     "transformation_visibility": {"FILTER", "GROUP_BY", "AGGREGATION", "DEDUPLICATION",
                                   "MAP", "REPARTITION", "SELECT", "WITH_COLUMN", "SORT", "UNION"},
@@ -46,6 +46,34 @@ def _covered(f: Finding) -> bool:
     """A finding's operation is considered 'covered' when it already has at least
     PARTIAL-quality logging."""
     return f.existing_logging and f.logging_quality in ("PARTIAL", "GOOD")
+
+
+# public alias - used by the report / tree builder
+def finding_covered(f: Finding) -> bool:
+    return _covered(f)
+
+
+_RISK_WEIGHT = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+
+
+def readiness_for(findings: List[Finding]) -> float:
+    """0-100 readiness for an arbitrary set of findings (method or file scope).
+
+    Weighted by priority so an uncovered HIGH hurts more than an uncovered LOW.
+    Returns 100.0 when there are no findings (nothing to instrument)."""
+    if not findings:
+        return 100.0
+    total = sum(_RISK_WEIGHT[f.priority] for f in findings)
+    got = sum(_RISK_WEIGHT[f.priority] for f in findings if _covered(f))
+    return round(100.0 * got / total, 1)
+
+
+def risk_level(findings: List[Finding]) -> str:
+    if any(f.priority == "HIGH" and not _covered(f) for f in findings):
+        return "HIGH"
+    if any(f.priority == "MEDIUM" and not _covered(f) for f in findings):
+        return "MEDIUM"
+    return "LOW"
 
 
 def compute_scores(files: List[CodeFile], findings: List[Finding]) -> Scores:

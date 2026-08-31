@@ -33,6 +33,7 @@ packages = [
 [tool.setuptools.package-data]
 "logadvisor.rules" = ["*.yaml"]
 "logadvisor.db" = ["migrations/*.sql"]
+"logadvisor.report" = ["*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

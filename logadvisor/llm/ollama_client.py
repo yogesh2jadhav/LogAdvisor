@@ -6,16 +6,21 @@ Only the pieces the advisor needs: ``/api/tags`` for availability checks and
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
+
+from .provider import GenerationResult, LLMProvider
 
 
 class OllamaError(RuntimeError):
     pass
 
 
-class OllamaClient:
+class OllamaClient(LLMProvider):
+    name = "ollama"
+
     def __init__(self, host: str = "http://localhost:11434", timeout: int = 120):
         self.host = host.rstrip("/")
         self.timeout = timeout
@@ -61,7 +66,7 @@ class OllamaClient:
         return any(n == model or n.split(":")[0] == base for n in names)
 
     def generate(self, model: str, prompt: str, *, system: Optional[str] = None,
-                 temperature: float = 0.1, json_format: bool = True) -> str:
+                 temperature: float = 0.1, json_format: bool = True) -> GenerationResult:
         payload: Dict[str, Any] = {
             "model": model,
             "prompt": prompt,
@@ -72,5 +77,13 @@ class OllamaClient:
             payload["system"] = system
         if json_format:
             payload["format"] = "json"
+        started = time.monotonic()
         data = self._post("/api/generate", payload)
-        return data.get("response", "")
+        wall_ms = int((time.monotonic() - started) * 1000)
+        total_ms = int(data.get("total_duration", 0) / 1_000_000) or wall_ms
+        return GenerationResult(
+            text=data.get("response", ""),
+            prompt_tokens=int(data.get("prompt_eval_count", 0) or 0),
+            output_tokens=int(data.get("eval_count", 0) or 0),
+            total_ms=total_ms,
+        )

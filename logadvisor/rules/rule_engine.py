@@ -58,12 +58,17 @@ class RuleEngine:
         ).hexdigest()[:16]
 
     def _finding_from(self, cf: CodeFile, method: Method, category: str, rule_id: str,
-                     line: int, det_priority: str, snippet: str) -> Finding:
+                     line: int, det_priority: str, snippet: str,
+                     execution_line: Optional[int] = None) -> Finding:
         spec = self.rules.get(rule_id, {})
         rule_priority = spec.get("priority", "low").upper()
         priority = rule_priority if _PRIORITY_RANK[rule_priority] >= _PRIORITY_RANK.get(det_priority, 0) \
             else det_priority
+        # a lazy transformation should be logged at its execution boundary, so
+        # count logging near either the definition or the materialisation line
         logs = self._nearby_logs(method, line)
+        if execution_line and execution_line != line:
+            logs = list({id(s): s for s in logs + self._nearby_logs(method, execution_line)}.values())
         required = list(spec.get("fields", []))
         quality = self._quality(logs, required, snippet)
         return Finding(
@@ -78,6 +83,7 @@ class RuleEngine:
             required_fields=required,
             rule_id=f"{rule_id}@{self.version}",
             snippet=snippet,
+            execution_line=execution_line,
             fingerprint=self._fingerprint(cf.path, method.class_name, method.name, category, rule_id, snippet),
         )
 
@@ -88,21 +94,40 @@ class RuleEngine:
             if cf.is_test:
                 continue
             for method in cf.methods:
+                has_job_start = False
                 for op in method.spark_operations:
+                    if op.operation_type == "JOB_START":
+                        has_job_start = True
                     rule_id = self._op_index.get(op.operation_type)
                     if not rule_id:
                         continue
                     findings.append(self._finding_from(
-                        cf, method, op.operation_type, rule_id, op.line, op.priority, op.snippet
+                        cf, method, op.operation_type, rule_id, op.line, op.priority,
+                        op.snippet, execution_line=op.materialized_at,
                     ))
+
+                # job completion: a method that starts a Spark job should log a
+                # structured "job finished" record (status + duration).
+                if has_job_start and "job.completion" in self.rules:
+                    end_logs = self._nearby_logs(method, method.end_line)
+                    if not any(s.structured for s in end_logs):
+                        findings.append(self._finding_from(
+                            cf, method, "JOB_COMPLETION", "job.completion",
+                            method.end_line, "HIGH",
+                            f"end of job method {method.name}()",
+                        ))
+
                 for exc in method.exception_boundaries:
-                    if exc.kind != "TRY_CATCH":
-                        continue
                     if exc.has_error_logging:
                         continue
+                    if exc.kind == "TRY_CATCH":
+                        snippet = f"catch block at line {exc.start_line}"
+                    elif exc.kind == "THROWS":
+                        snippet = f"method {method.name}() declares checked exceptions, no error logging"
+                    else:
+                        continue
                     findings.append(self._finding_from(
-                        cf, method, "EXCEPTION", "exception", exc.start_line, "HIGH",
-                        f"catch block at line {exc.start_line}",
+                        cf, method, "EXCEPTION", "exception", exc.start_line, "HIGH", snippet,
                     ))
         findings.sort(key=lambda f: (-_PRIORITY_RANK[f.priority], f.file, f.line))
         return findings

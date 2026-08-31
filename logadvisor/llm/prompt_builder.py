@@ -71,6 +71,15 @@ Deterministic finding:
   deterministic priority: {finding.priority}
   existing logging near operation: {finding.existing_logging}
   logging quality: {finding.logging_quality}
+  execution boundary: {(
+      f"line {finding.execution_line} - this transformation is lazy and only "
+      f"runs when the Spark action there executes; recommend logging its "
+      f"metrics at that action"
+  ) if finding.execution_line and finding.execution_line != finding.line else (
+      "no Spark action found in this method - the transformation may be "
+      "materialized elsewhere" if finding.execution_line is None and finding.category
+      not in ("EXCEPTION", "JOB_START", "JOB_COMPLETION") else "runs where defined"
+  )}
 
 Detected Spark operations in method: {', '.join(detected) or 'none'}
 

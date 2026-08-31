@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from typing import Optional
 
@@ -10,7 +11,7 @@ from .analyzer import AdvisorError, run_scan
 from .config import Config
 from .db.database import Database
 from .llm.ollama_client import OllamaClient
-from .report import write_json_report, write_markdown_report
+from .report import write_html_report, write_json_report, write_markdown_report
 
 
 def _log(msg: str) -> None:
@@ -19,6 +20,35 @@ def _log(msg: str) -> None:
 
 def _quiet(_msg: str) -> None:
     pass
+
+
+class _ProgressBar:
+    """Single-line \\r progress bar on stderr. No-op unless stderr is a TTY."""
+
+    WIDTH = 24
+
+    def __init__(self, enabled: Optional[bool] = None):
+        self.enabled = sys.stderr.isatty() if enabled is None else enabled
+        self._active = False
+
+    def __call__(self, done: int, total: int, label: str = "") -> None:
+        if not self.enabled or total <= 0:
+            return
+        done = min(done, total)
+        filled = int(self.WIDTH * done / total)
+        bar = "█" * filled + "░" * (self.WIDTH - filled)
+        pct = int(100 * done / total)
+        sys.stderr.write(f"\r  {label:<16} {bar} {pct:3d}%  {done}/{total}   ")
+        sys.stderr.flush()
+        self._active = True
+        if done >= total:
+            self.finish()
+
+    def finish(self) -> None:
+        if self.enabled and self._active:
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+            self._active = False
 
 
 def _load_config(args) -> Config:
@@ -47,11 +77,15 @@ def cmd_scan(args) -> int:
 
     print("AI-Ready Logging Advisor")
     print("────────────────────────")
+    # progress bar only when not in verbose mode (verbose prints its own lines)
+    bar = _ProgressBar(enabled=False if args.verbose else None)
     try:
-        result = run_scan(args.project, cfg, use_llm=use_llm, log=log)
+        result = run_scan(args.project, cfg, use_llm=use_llm, log=log, progress=bar)
     except (AdvisorError, ValueError) as exc:
+        bar.finish()
         print(f"\n{exc}", file=sys.stderr)
         return 2
+    bar.finish()
 
     db = Database(cfg.database["path"])
     scan_id = db.save_scan(result)
@@ -60,6 +94,7 @@ def cmd_scan(args) -> int:
     out_dir = cfg.output["dir"]
     md = write_markdown_report(result, out_dir)
     js = write_json_report(result, out_dir)
+    html = write_html_report(result, out_dir)
 
     print(f"\nProject:            {result.project.project_name}")
     print(f"Files:              {result.files_scanned}")
@@ -80,6 +115,7 @@ def cmd_scan(args) -> int:
     print(f"\nScan id: {scan_id}")
     print(f"Report:  {md}")
     print(f"         {js}")
+    print(f"         {html}   (open in a browser for the tree view)")
     return 0
 
 
@@ -106,10 +142,10 @@ def cmd_doctor(args) -> int:
         return 1
 
     try:
-        raw = client.generate(model, 'Return the JSON {"ok": true} and nothing else.',
+        res = client.generate(model, 'Return the JSON {"ok": true} and nothing else.',
                               temperature=0.0, json_format=True)
         import json as _json
-        parsed = _json.loads(raw)
+        parsed = _json.loads(res.text)
         gen_ok = isinstance(parsed, dict)
     except Exception as exc:  # noqa: BLE001
         print(f"\nTest generation:\n    ✗ {exc}")
@@ -169,9 +205,89 @@ def cmd_compare(args) -> int:
 
 
 def cmd_report(args) -> int:
-    print("Report regeneration from the database is not yet implemented; "
-          "re-run `scan` to refresh reports.", file=sys.stderr)
-    return 1
+    cfg = _load_config(args)
+    db = Database(cfg.database["path"])
+    scan_id = args.scan or db.latest_scan_id()
+    if scan_id is None:
+        print("No scans in the database.", file=sys.stderr)
+        db.close()
+        return 1
+    result = db.load_scan_result(scan_id)
+    db.close()
+    if result is None:
+        print(f"Scan {scan_id} not found.", file=sys.stderr)
+        return 1
+    out_dir = args.output or cfg.output["dir"]
+    md = write_markdown_report(result, out_dir)
+    js = write_json_report(result, out_dir)
+    html = write_html_report(result, out_dir)
+    print(f"Regenerated reports for scan {scan_id} ({result.project.project_name}, "
+          f"score {result.scores.overall_score}/100):")
+    print(f"  {md}\n  {js}\n  {html}")
+    return 0
+
+
+def cmd_benchmark(args) -> int:
+    from .llm.benchmark import run_benchmark
+
+    cfg = _load_config(args)
+    models = [m for chunk in args.models for m in chunk.split(",") if m.strip()]
+    if not models:
+        print("Pass --models qwen3-coder:8b,qwen3-coder:30b", file=sys.stderr)
+        return 2
+    log = _log if args.verbose else _quiet
+    print(f"Benchmarking {len(models)} model(s) on {args.project}\n")
+    try:
+        rows = run_benchmark(args.project, cfg, models,
+                             min_priority=args.llm_priority or cfg.llm["priority"],
+                             limit=args.llm_limit if args.llm_limit is not None else cfg.llm["limit"],
+                             log=log)
+    except (AdvisorError, ValueError) as exc:
+        print(f"\n{exc}", file=sys.stderr)
+        return 2
+
+    hdr = f"{'MODEL':<22}{'OK':>5}{'FAIL':>6}{'STRUCT%':>9}{'AVG ms':>9}{'TOTAL s':>9}{'OUT tok':>9}{'RECS':>6}"
+    print(hdr)
+    print("-" * len(hdr))
+    for r in rows:
+        if not r.get("available"):
+            print(f"{r['model']:<22}{'— not available —':>46}")
+            continue
+        print(f"{r['model']:<22}{r['ok']:>5}{r['failed']:>6}"
+              f"{r['structured_output_rate']*100:>8.0f}%{r['avg_response_ms']:>9.0f}"
+              f"{r['total_analysis_s']:>9.1f}{r['output_tokens']:>9}{r['recommendation_count']:>6}")
+    print("\nRecommendation quality still needs manual review — this measures "
+          "mechanical reliability only.")
+    return 0
+
+
+def cmd_eval(args) -> int:
+    from .llm.eval_set import run_eval
+
+    cfg = _load_config(args)
+    model = args.model or cfg.llm["model"]
+    log = _log if args.verbose else _quiet
+    print(f"Evaluating recommendation quality: {model}\n")
+    try:
+        res = run_eval(cfg, model, log=log)
+    except (RuntimeError, ValueError) as exc:
+        print(f"{exc}", file=sys.stderr)
+        return 2
+
+    print(f"{'CASE':<16}{'CATEGORY':<16}{'RESULT'}")
+    print("-" * 70)
+    for r in res["cases"]:
+        if r["failed"]:
+            verdict = "FAIL — " + ", ".join(r["failed"])
+        elif not r["passed"]:
+            verdict = "no finding detected"
+        else:
+            verdict = f"pass ({len(r['passed'])} checks)"
+        print(f"{r['id']:<16}{r['category']:<16}{verdict}")
+    s = res["summary"]
+    print(f"\nClean cases: {s['clean_cases']}/{s['cases']}   "
+          f"Checks passed: {s['checks_passed']}/{s['checks_run']} ({s['pass_rate']*100:.0f}%)")
+    return 0 if s["clean_cases"] == s["cases"] else 1
 
 
 def cmd_findings(args) -> int:
@@ -193,6 +309,33 @@ def cmd_findings(args) -> int:
 def cmd_finding(args) -> int:
     cfg = _load_config(args)
     db = Database(cfg.database["path"])
+    if args.action == "show":
+        f = db.get_finding(args.id)
+        db.close()
+        if not f:
+            print(f"Finding {args.id} not found.")
+            return 1
+        print(f"Finding #{f['id']}  [{f['priority']}]  {f['category']}  ({f['status']})")
+        print(f"  {f['file_path'] or '?'}:{f['line']}   {f['class_name'] or '?'}.{f['method_name'] or '?'}")
+        print(f"  rule: {f['rule_id']}   existing logging: {bool(f['existing_logging'])} "
+              f"({f['logging_quality']})   LLM: {f['llm_status']}")
+        req = json.loads(f["required_fields"] or "[]")
+        print(f"  required fields: {', '.join(req) or '—'}")
+        if f["snippet"]:
+            print(f"  snippet: {f['snippet']}")
+        r = f.get("recommendation")
+        if r:
+            print(f"\n  Recommendation ({r['model'] or '?'}): {r['reason']}")
+            print(f"    fields:     {', '.join(json.loads(r['recommended_fields'] or '[]'))}")
+            print(f"    do NOT log: {', '.join(json.loads(r['do_not_log'] or '[]'))}")
+            print(f"    AI value:   {r['ai_usefulness']}  {', '.join(json.loads(r['ai_use_cases'] or '[]'))}")
+        run = f.get("llm_run")
+        if run and run.get("duration_ms"):
+            print(f"\n  LLM run: {run['status']} in {run['duration_ms']} ms, "
+                  f"{run['input_tokens']}→{run['output_tokens']} tokens"
+                  f"{' (cache hit)' if run['cache_hit'] else ''}")
+        return 0
+
     status_map = {
         "accept": "ACCEPTED", "reject": "REJECTED",
         "implemented": "IMPLEMENTED", "false-positive": "FALSE_POSITIVE",
@@ -249,10 +392,26 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.set_defaults(func=cmd_compare)
 
-    sp = sub.add_parser("report", help="(re)generate a report for a scan")
-    sp.add_argument("--scan", type=int, required=True)
+    sp = sub.add_parser("report", help="(re)generate reports for a scan from the database")
+    sp.add_argument("--scan", type=int, help="scan id (default: latest)")
+    sp.add_argument("--output")
     add_common(sp)
     sp.set_defaults(func=cmd_report)
+
+    sp = sub.add_parser("eval", help="score a model against the built-in recommendation eval set")
+    sp.add_argument("--verbose", "-v", action="store_true")
+    add_common(sp)
+    sp.set_defaults(func=cmd_eval)
+
+    sp = sub.add_parser("benchmark", help="compare local models on one project")
+    sp.add_argument("--project", required=True)
+    sp.add_argument("--models", action="append", required=True,
+                    help="comma-separated, e.g. --models qwen3-coder:8b,qwen3-coder:30b")
+    sp.add_argument("--llm-priority", choices=["high", "medium", "low"])
+    sp.add_argument("--llm-limit", type=int)
+    sp.add_argument("--verbose", "-v", action="store_true")
+    add_common(sp)
+    sp.set_defaults(func=cmd_benchmark)
 
     sp = sub.add_parser("findings", help="list findings")
     sp.add_argument("--scan", type=int)
@@ -260,8 +419,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(sp)
     sp.set_defaults(func=cmd_findings)
 
-    sp = sub.add_parser("finding", help="update a finding's lifecycle status")
-    sp.add_argument("action", choices=["accept", "reject", "implemented",
+    sp = sub.add_parser("finding", help="show or update a single finding")
+    sp.add_argument("action", choices=["show", "accept", "reject", "implemented",
                                        "false-positive", "reviewed"])
     sp.add_argument("id", type=int)
     add_common(sp)
