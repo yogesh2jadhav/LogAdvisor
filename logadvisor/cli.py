@@ -63,6 +63,7 @@ def _load_config(args) -> Config:
         llm_limit=getattr(args, "llm_limit", None),
         include=getattr(args, "include", None),
         exclude=getattr(args, "exclude", None),
+        parser=getattr(args, "parser", None),
     )
     return cfg
 
@@ -96,7 +97,10 @@ def cmd_scan(args) -> int:
     js = write_json_report(result, out_dir)
     html = write_html_report(result, out_dir)
 
+    from .scanner.java_parser import active_backend
+
     print(f"\nProject:            {result.project.project_name}")
+    print(f"Parser:             {active_backend()}")
     print(f"Files:              {result.files_scanned}")
     print(f"Methods:            {result.methods_scanned}")
     print(f"Spark operations:   {result.spark_operations}")
@@ -367,6 +371,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--include", action="append")
     sp.add_argument("--exclude", action="append")
     sp.add_argument("--no-llm", action="store_true", help="deterministic scan only")
+    sp.add_argument("--parser", choices=["auto", "treesitter", "regex"],
+                    help="Java parser backend (default: auto — tree-sitter if installed)")
     sp.add_argument("--llm-priority", choices=["high", "medium", "low"])
     sp.add_argument("--llm-limit", type=int)
     sp.add_argument("--verbose", "-v", action="store_true")

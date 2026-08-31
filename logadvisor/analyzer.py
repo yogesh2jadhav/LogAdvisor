@@ -50,10 +50,14 @@ def run_pass1(project_path: str, config: Config, log: Optional[Logger] = None,
     progress = progress or _noop_progress
     project_path = os.path.abspath(project_path)
 
+    from .scanner import java_parser as _jp
+
+    _jp.set_backend(config.scan.get("parser", "auto"))
     log("scan_start")
     info, java_files = scan_project(project_path, config.scan["ignore_dirs"])
     log(f"discovered {info.java_files} java files ({info.test_files} tests), "
-        f"build={info.build_system}, spark={info.spark_version or '?'}")
+        f"build={info.build_system}, spark={info.spark_version or '?'}, "
+        f"parser={_jp.active_backend()}")
 
     files: List[CodeFile] = []
     sources: Dict[str, str] = {}

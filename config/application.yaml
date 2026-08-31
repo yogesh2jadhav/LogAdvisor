@@ -2,6 +2,7 @@
 # Copy / edit and pass with:  java-log-advisor scan --project ... --config config/application.yaml
 
 scan:
+  parser: auto          # auto | treesitter | regex  (auto = tree-sitter when installed)
   ignore_dirs:
     - .git
     - target

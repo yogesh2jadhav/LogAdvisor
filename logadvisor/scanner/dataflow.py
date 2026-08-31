@@ -93,13 +93,18 @@ def _mk_stmt(seg: str, line: int) -> _Stmt:
     return _Stmt(line, lhs, refs, has_action, seg.strip())
 
 
-def annotate(method: Method, masked_body: str) -> None:
+def annotate(method: Method, masked_body: str, base_line: Optional[int] = None) -> None:
     """Populate ``is_action`` / ``lazy`` / ``materialized_at`` on the method's
-    Spark operations, in place."""
+    Spark operations, in place.
+
+    ``base_line`` is the source line of the first character of ``masked_body``
+    (i.e. the method body's opening brace). Defaults to ``method.start_line``
+    for callers where the signature and brace share a line.
+    """
     if not method.spark_operations:
         return
 
-    stmts = _split_statements(masked_body, method.start_line)
+    stmts = _split_statements(masked_body, base_line if base_line is not None else method.start_line)
     params = {p.split()[-1].strip("[]") for p in method.parameters if p.split()}
 
     # var -> line where it was (last) assigned

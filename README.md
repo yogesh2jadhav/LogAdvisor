@@ -39,7 +39,9 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e .
 ```
 
-Requires Python 3.11+. Runtime deps: `PyYAML`, `pydantic`.
+Requires Python 3.11+. Runtime deps: `PyYAML`, `pydantic`, `tree-sitter`,
+`tree-sitter-java` (the parser falls back to a pure-Python backend if the
+tree-sitter packages are unavailable).
 
 ## Set up the local model (for pass 2)
 
@@ -170,7 +172,7 @@ Test fixture: [`tests/fixtures/sample-spark-project`](tests/fixtures/sample-spar
 
 ```
 logadvisor/
-  scanner/     project discovery + Java/Spark/logging/exception detection
+  scanner/     project discovery; java_parser dispatcher -> treesitter_parser / regex_parser; Spark/logging/exception/dataflow detection
   rules/       logging_rules.yaml + deterministic rule engine
   llm/         provider interface, ollama client, prompt builder, response validation, cache, analyzer, benchmark
   db/          SQLite persistence + migrations
@@ -181,10 +183,21 @@ logadvisor/
   cli.py       command-line interface
 ```
 
+## Java parser backend
+
+Two backends, same `CodeFile` output:
+
+* **tree-sitter** (default) — real AST via `tree-sitter` + `tree-sitter-java`
+  (core dependencies). Correct nested-class attribution, multi-line generic
+  signatures, precise parameter lists, `throws` clauses.
+* **regex** — dependency-free literal-masking + brace-matching fallback; used
+  automatically if tree-sitter can't be imported.
+
+Select with `scan --parser {auto,treesitter,regex}`, the `scan.parser` config
+key, or `$LOGADVISOR_PARSER`. The active backend is printed by `scan` and
+recorded in the JSON report (`parser_backend`).
+
 ## Not in this version
 
 Vector/graph DBs, RAG, agents, patient-data analysis, automatic source
 modification, git commit/push, cloud LLMs. See `Plan.md` §45.
-
-The Java parser is a pragmatic literal-masking + brace-matching implementation
-(no regex for body semantics). A tree-sitter backend is the intended upgrade.
