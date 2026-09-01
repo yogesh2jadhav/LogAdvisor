@@ -237,9 +237,13 @@ def parse_java_file(path: str, project_root: str) -> CodeFile:
             annotations=_preceding_annotations(masked, hint.start()),
         )
         masked_body = masked[brace_open:brace_close + 1]
-        method.spark_operations = detect_spark_operations(body, masked_body, start_line)
-        method.logging_statements = detect_logging(body, masked_body, start_line)
-        method.exception_boundaries = detect_exceptions(body, masked_body, start_line)
+        # the detectors count newlines from the start of masked_body (the '{'),
+        # so their base line must be the line of the '{', NOT the method name -
+        # these differ whenever the signature spans multiple lines.
+        body_line = _line_of(src, brace_open)
+        method.spark_operations = detect_spark_operations(body, masked_body, body_line)
+        method.logging_statements = detect_logging(body, masked_body, body_line)
+        method.exception_boundaries = detect_exceptions(body, masked_body, body_line)
 
         if throws_clause:
             has_err = any(ls.level in ("ERROR", "WARN") for ls in method.logging_statements) \
@@ -248,7 +252,7 @@ def parse_java_file(path: str, project_root: str) -> CodeFile:
                 ExceptionBoundary("THROWS", start_line, start_line, has_err)
             )
 
-        annotate_dataflow(method, masked_body)
+        annotate_dataflow(method, masked_body, base_line=body_line)
         cf.methods.append(method)
 
     cf.methods.sort(key=lambda x: x.start_line)
