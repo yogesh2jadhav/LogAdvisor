@@ -45,7 +45,7 @@ _COMPILED = [(kind, re.compile(rx)) for kind, rx in _PATTERNS]
 
 def detect_io(body: str, masked_body: str, start_line: int) -> List[SparkOperation]:
     ops: List[SparkOperation] = []
-    lines = body.splitlines()
+    lines = body.split("\n")  # keep index consistent with masked_body.count("\n")
     seen = set()
     for kind, rx in _COMPILED:
         for m in rx.finditer(masked_body):
