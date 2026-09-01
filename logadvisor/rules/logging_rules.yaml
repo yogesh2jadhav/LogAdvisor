@@ -55,6 +55,11 @@ rules:
     spark_ops: []
     fields: [run_id, job_name, processing_stage, operation, exception_type, error_message, duration]
 
+  external_io:
+    priority: medium
+    spark_ops: [EXTERNAL_IO]
+    fields: [run_id, operation, target, duration_ms, status, record_count]
+
 # how far (in lines) an existing log statement can be from an operation and
 # still be considered "logging around" that operation.
 proximity_lines: 8

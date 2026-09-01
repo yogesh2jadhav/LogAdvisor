@@ -63,6 +63,7 @@ def _detected(method: Method) -> Dict[str, bool]:
         "filter": "FILTER" in op_types,
         "aggregation": bool(op_types & _AGG),
         "output": bool(op_types & _OUTPUT),
+        "external_io": "EXTERNAL_IO" in op_types,
         "structured_logging": any(s.structured for s in logs),
         "exception_context": bool(excs) and all(e.has_error_logging for e in excs),
         "run_correlation": any(_RUN_ID_RE.search(s.message_pattern) for s in logs),
@@ -111,7 +112,7 @@ def build_report_document(result: ScanResult) -> dict:
                 "spark_operations": [
                     {"type": op.operation_type, "line": op.line, "priority": op.priority,
                      "lazy": op.lazy, "is_action": op.is_action,
-                     "materialized_at": op.materialized_at}
+                     "materialized_at": op.materialized_at, "detail": op.snippet}
                     for op in method.spark_operations
                 ],
                 "existing_logs": [

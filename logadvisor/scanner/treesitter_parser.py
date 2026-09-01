@@ -20,8 +20,9 @@ from typing import List
 from ..models import CodeFile, ExceptionBoundary, Method
 from .dataflow import annotate as annotate_dataflow
 from .exception_detector import detect_exceptions
+from .io_detector import detect_io
 from .logging_detector import detect_logging
-from .spark_detector import detect_spark_operations
+from .spark_detector import detect_spark_operations, method_has_spark_context
 
 _TYPE_DECL = {
     "class_declaration", "interface_declaration", "enum_declaration",
@@ -120,7 +121,8 @@ def _has_throws(node) -> bool:
     return any(c.type == "throws" for c in node.children)
 
 
-def _add_method(node, src_bytes: bytes, masked: bytes, cf: CodeFile, class_name: str) -> None:
+def _add_method(node, src_bytes: bytes, masked: bytes, cf: CodeFile, class_name: str,
+                file_has_spark_import: bool = False) -> None:
     name_node = node.child_by_field_name("name")
     if name_node is None:
         return
@@ -147,7 +149,10 @@ def _add_method(node, src_bytes: bytes, masked: bytes, cf: CodeFile, class_name:
         body_txt = src_bytes[b0:b1].decode("utf-8", "replace")
         masked_body = masked[b0:b1].decode("utf-8", "replace")
         base_line = _line(body)
-        method.spark_operations = detect_spark_operations(body_txt, masked_body, base_line)
+        spark_ctx = method_has_spark_context(masked_body, file_has_spark_import)
+        method.spark_operations = detect_spark_operations(body_txt, masked_body, base_line, spark_ctx)
+        method.spark_operations += detect_io(body_txt, masked_body, base_line)
+        method.spark_operations.sort(key=lambda o: o.line)
         method.logging_statements = detect_logging(body_txt, masked_body, base_line)
         method.exception_boundaries = detect_exceptions(body_txt, masked_body, base_line)
 
@@ -164,19 +169,20 @@ def _add_method(node, src_bytes: bytes, masked: bytes, cf: CodeFile, class_name:
     cf.methods.append(method)
 
 
-def _collect(node, src_bytes: bytes, masked: bytes, cf: CodeFile, class_name: str) -> None:
+def _collect(node, src_bytes: bytes, masked: bytes, cf: CodeFile, class_name: str,
+             spark_import: bool) -> None:
     if node.type in _TYPE_DECL:
         name_node = node.child_by_field_name("name")
         name = _txt(name_node) if name_node is not None else "<anon>"
         (cf.interfaces if node.type == "interface_declaration" else cf.classes).append(name)
         for c in node.children:
-            _collect(c, src_bytes, masked, cf, name)
+            _collect(c, src_bytes, masked, cf, name, spark_import)
         return
     if node.type in _METHOD_DECL:
-        _add_method(node, src_bytes, masked, cf, class_name)
+        _add_method(node, src_bytes, masked, cf, class_name, spark_import)
         return
     for c in node.children:
-        _collect(c, src_bytes, masked, cf, class_name)
+        _collect(c, src_bytes, masked, cf, class_name, spark_import)
 
 
 def parse_java_file(path: str, project_root: str) -> CodeFile:
@@ -205,6 +211,7 @@ def parse_java_file(path: str, project_root: str) -> CodeFile:
                 if n.type in ("scoped_identifier", "identifier"):
                     cf.imports.append(_txt(n))
 
-    _collect(root, src_bytes, masked, cf, "")
+    spark_import = any("org.apache.spark" in imp for imp in cf.imports)
+    _collect(root, src_bytes, masked, cf, "", spark_import)
     cf.methods.sort(key=lambda m: m.start_line)
     return cf

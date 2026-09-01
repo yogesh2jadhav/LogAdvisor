@@ -132,18 +132,19 @@
     const cats=[
       ["Job lifecycle","job_lifecycle",15],["Input visibility","input_visibility",15],
       ["Transformation","transformation_visibility",15],["Join visibility","join_visibility",15],
-      ["Output visibility","output_visibility",15],["Exception visibility","exception_visibility",10],
+      ["Output / external I/O","output_visibility",15],["Exception visibility","exception_visibility",10],
       ["Structured logging","structured_logging",10],["Run correlation","run_correlation",5]];
+    const na=new Set(sc.not_applicable||[]);
     $("#hdr").innerHTML = `
       <h1>${esc(p.project_name)} — AI-Ready Logging Advisory</h1>
-      <div class="sub">${esc(p.build_system||"?")} · Java ${esc(p.java_version||"?")} · Spark ${esc(p.spark_version||"?")}
+      <div class="sub">${p.project_type==="java"?"Java (no Spark)":"Java + Spark"} · ${esc(p.build_system||"?")} · Java ${esc(p.java_version||"?")} · Spark ${esc(p.spark_version||"?")}
         · ${esc((p.logging_frameworks||[]).join(", ")||"no logging framework")}
         · scan #${esc(D.scan_id)} · ${esc(D.generated_at||"")}
         · LLM: ${D.llm && D.llm.enabled ? esc(D.llm.model)+" (calls "+esc(s.llm_calls)+", failures "+esc(s.llm_failures)+", cache "+esc(s.cache_hits)+")" : "disabled"}</div>
       <div class="kpis">
         <div class="kpi"><b>${s.files_scanned}</b><span>files</span></div>
         <div class="kpi"><b>${s.methods_scanned}</b><span>methods</span></div>
-        <div class="kpi"><b>${s.spark_operations}</b><span>spark ops</span></div>
+        <div class="kpi"><b>${s.spark_operations}</b><span>${p.project_type==="java"?"io ops":"spark ops"}</span></div>
         <div class="kpi"><b>${s.existing_logs}</b><span>existing logs</span></div>
         <div class="kpi"><b>${s.findings_count}</b><span>findings</span></div>
         <div class="kpi"><b style="color:var(--high)">${s.high}</b><span>high</span></div>
@@ -153,7 +154,10 @@
       <div class="scorewrap">
         <div class="bigscore">${sc.overall_score}<small>/100</small></div>
         <div class="bars">
-          ${cats.map(([lbl,k,mx])=>`
+          ${cats.map(([lbl,k,mx])=> na.has(k) ? `
+            <div class="lbl">${lbl}</div>
+            <div class="bar"></div>
+            <div class="val muted">n/a</div>` : `
             <div class="lbl">${lbl}</div>
             <div class="bar"><i style="width:${Math.round(100*(sc[k]||0)/mx)}%"></i></div>
             <div class="val">${sc[k]||0}/${mx}</div>`).join("")}
@@ -257,7 +261,7 @@
     const {file,m}=selected;
     const d=m.detected||{};
     const matrix=[["input","Input read"],["join","Join"],["filter","Filter"],["aggregation","Aggregation"],
-      ["output","Output write"],["structured_logging","Structured logging"],
+      ["output","Output write"],["external_io","External I/O"],["structured_logging","Structured logging"],
       ["exception_context","Exception context"],["run_correlation","Run correlation"]];
     const fs=(m.finding_ids||[]).map(id=>findingById[id]).filter(Boolean);
     $("#view").innerHTML=`
@@ -270,12 +274,18 @@
           ${matrix.map(([k,l])=>`<span class="m ${d[k]?"yes":"no"}">${d[k]?"✓":"✗"} ${l}</span>`).join("")}
         </div>
       </div>
-      ${m.spark_operations&&m.spark_operations.length?`<div class="card"><h3>Spark operations</h3>
+      ${(()=>{const sp=(m.spark_operations||[]).filter(o=>o.type!=="EXTERNAL_IO"),io=(m.spark_operations||[]).filter(o=>o.type==="EXTERNAL_IO");let h="";
+        if(sp.length){h+=`<div class="card"><h3>Spark operations</h3>
         <table><tr><th>Type</th><th>Line</th><th>Priority</th><th>Executes at</th></tr>
-        ${m.spark_operations.map(o=>`<tr><td>${esc(o.type)}</td><td>${o.line}</td>
+        ${sp.map(o=>`<tr><td>${esc(o.type)}</td><td>${o.line}</td>
           <td><span class="pill ${o.priority}">${o.priority}</span></td>
           <td class="muted">${o.is_action?"action (here)":o.materialized_at&&o.materialized_at!==o.line?("line "+o.materialized_at):o.lazy&&!o.materialized_at?"<span class='warn'>not materialized here</span>":"—"}</td></tr>`).join("")}</table>
-        <div class="muted" style="margin-top:6px">Spark is lazy — log a transformation's record-flow metrics at the action that runs it.</div></div>`:""}
+        <div class="muted" style="margin-top:6px">Spark is lazy — log a transformation's record-flow metrics at the action that runs it.</div></div>`;}
+        if(io.length){h+=`<div class="card"><h3>External I/O</h3>
+        <table><tr><th>Kind</th><th>Line</th></tr>
+        ${io.map(o=>`<tr><td>${esc((o.detail||"").replace(/^\\[(\\w+)\\].*/,'$1')||"i/o")}</td><td>${o.line}</td></tr>`).join("")}</table>
+        <div class="muted" style="margin-top:6px">Log operation, target, duration, status and record count around each boundary.</div></div>`;}
+        return h;})()}
       ${m.existing_logs&&m.existing_logs.length?`<div class="card"><h3>Existing logging</h3>
         <table><tr><th>Level</th><th>Line</th><th>Structured</th><th>Flag</th></tr>
         ${m.existing_logs.map(l=>`<tr><td>${esc(l.level)}</td><td>${l.line}</td><td>${l.structured?"yes":"<span class='muted'>no</span>"}</td><td>${l.sensitive?"<span class='warn'>sensitive?</span>":""}</td></tr>`).join("")}</table></div>`:""}

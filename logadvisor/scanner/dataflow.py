@@ -28,7 +28,7 @@ _ACTION_RE = re.compile(
 )
 _WRITE_RE = re.compile(r"\.\s*write\s*\(\s*\)")
 _ACTION_TYPES = {"SPARK_ACTION", "DATASET_WRITE", "PARQUET_WRITE"}
-_READ_TYPES = {"DATASET_READ", "PARQUET_READ"}
+_READ_TYPES = {"DATASET_READ", "PARQUET_READ", "EXTERNAL_IO"}
 
 _ASSIGN_RE = re.compile(
     r"^\s*(?:final\s+)?(?:[A-Za-z_$][\w$.]*(?:\s*<[^;=]*?>)?(?:\s*\[\s*\])?\s+)?"

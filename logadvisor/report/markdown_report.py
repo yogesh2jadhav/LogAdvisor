@@ -50,18 +50,21 @@ def _finding_block(idx: int, f: Finding) -> str:
 def _score_table(result: ScanResult) -> str:
     s = result.scores
     rows = [
-        ("Job lifecycle", s.job_lifecycle, 15),
-        ("Input visibility", s.input_visibility, 15),
-        ("Transformation visibility", s.transformation_visibility, 15),
-        ("Join visibility", s.join_visibility, 15),
-        ("Output visibility", s.output_visibility, 15),
-        ("Exception visibility", s.exception_visibility, 10),
-        ("Structured logging", s.structured_logging, 10),
-        ("Trace / run correlation", s.run_correlation, 5),
+        ("Job lifecycle", "job_lifecycle", s.job_lifecycle, 15),
+        ("Input visibility", "input_visibility", s.input_visibility, 15),
+        ("Transformation visibility", "transformation_visibility", s.transformation_visibility, 15),
+        ("Join visibility", "join_visibility", s.join_visibility, 15),
+        ("Output / external-I/O visibility", "output_visibility", s.output_visibility, 15),
+        ("Exception visibility", "exception_visibility", s.exception_visibility, 10),
+        ("Structured logging", "structured_logging", s.structured_logging, 10),
+        ("Trace / run correlation", "run_correlation", s.run_correlation, 5),
     ]
     out = ["| Category | Score | Max |", "| --- | ---: | ---: |"]
-    for name, val, mx in rows:
-        out.append(f"| {name} | {val} | {mx} |")
+    for name, key, val, mx in rows:
+        if key in s.not_applicable:
+            out.append(f"| {name} | n/a | — |")
+        else:
+            out.append(f"| {name} | {val} | {mx} |")
     out.append(f"| **Overall** | **{s.overall_score}** | **100** |")
     return "\n".join(out)
 
@@ -81,10 +84,11 @@ def write_markdown_report(result: ScanResult, out_dir: str) -> str:
     A("")
     A("## Executive Summary")
     A("")
-    A(f"- Project: **{p.project_name}**")
+    _spark = p.project_type == "java-spark"
+    A(f"- Project: **{p.project_name}**  ({'Java + Apache Spark' if _spark else 'Java (no Spark detected)'})")
     A(f"- Files scanned: {result.files_scanned}")
     A(f"- Methods analyzed: {result.methods_scanned}")
-    A(f"- Spark operations detected: {result.spark_operations}")
+    A(f"- {'Spark' if _spark else 'Instrumentation'} operations detected: {result.spark_operations}")
     A(f"- Existing logging statements: {result.existing_logs}")
     A(f"- Potential logging gaps (findings): {len(result.findings)}")
     A(f"- AI Observability Score: **{result.scores.overall_score}/100**")
@@ -101,6 +105,13 @@ def write_markdown_report(result: ScanResult, out_dir: str) -> str:
     A(f"- Spark version: {p.spark_version or 'unknown'}")
     A(f"- Logging frameworks: {', '.join(p.logging_frameworks) or 'unknown'}")
     A("")
+
+    if not _spark:
+        A("> No Spark dependency or API usage detected — this is scored as a plain "
+          "Java project. Spark data-flow categories are marked n/a and excluded "
+          "from the overall score; exception handling, structured logging, run "
+          "correlation and external-I/O boundaries are still assessed.")
+        A("")
 
     A("## AI Observability Score")
     A("")
@@ -140,53 +151,74 @@ def write_markdown_report(result: ScanResult, out_dir: str) -> str:
             A(f"  - {pth}:{s.line} — `{s.message_pattern}`")
     A("")
 
-    A("## Spark Pipeline Analysis")
+    A("## External I/O Boundaries")
     A("")
-    op_counts = Counter(op.operation_type for cf in result.files for m in cf.methods for op in m.spark_operations)
-    for op, n in op_counts.most_common():
-        A(f"- {op}: {n}")
-    A("")
-
-    A("## Spark Execution Boundaries")
-    A("")
-    A("Spark is lazily evaluated — transformations only run when an action forces "
-      "them. Log record-flow metrics **at the action**, carrying the transformation's "
-      "counts through.")
-    A("")
-    boundaries = [
-        (cf.path, m, op)
-        for cf in result.files for m in cf.methods for op in m.spark_operations
-        if op.lazy and op.materialized_at and op.materialized_at != op.line
-    ]
-    if boundaries:
-        A("| Transformation | Defined | Executes at |")
-        A("| --- | ---: | ---: |")
-        for pth, m, op in boundaries[:40]:
-            A(f"| {op.operation_type} in `{m.class_name}.{m.name}` | {pth}:{op.line} | line {op.materialized_at} |")
-    else:
-        A("_No deferred transformation/action pairs detected._")
-    orphans = [
-        (cf.path, m, op)
-        for cf in result.files for m in cf.methods for op in m.spark_operations
-        if op.lazy and op.materialized_at is None and op.operation_type not in ("SELECT", "WITH_COLUMN")
-    ]
-    if orphans:
+    io_findings = [f for f in result.findings if f.category == "EXTERNAL_IO"]
+    if io_findings:
+        A(f"Calls that cross a process boundary (DB / HTTP / filesystem / message "
+          f"broker) \u2014 {len(io_findings)} found. Log `operation, target, "
+          f"duration_ms, status, record_count` around each.")
         A("")
-        A(f"⚠️  {len(orphans)} transformation(s) with no Spark action in the same method "
-          "— confirm they are materialized downstream:")
-        for pth, m, op in orphans[:20]:
-            A(f"- {op.operation_type} at {pth}:{op.line} in `{m.class_name}.{m.name}`")
+        for f in io_findings[:60]:
+            A(f"- {f.file}:{f.line} \u2014 `{f.class_name}.{f.method}` "
+              f"\u2014 {f.logging_quality}  ({f.snippet})")
+    else:
+        A("_No external I/O calls detected._")
     A("")
 
-    A("## Parquet Output Analysis")
-    A("")
-    writes = [f for f in result.findings if f.category in ("DATASET_WRITE", "PARQUET_WRITE")]
-    A(f"- Output findings: {len(writes)}")
-    for f in writes:
-        A(f"  - {f.file}:{f.line} — {f.logging_quality}")
-    A("")
-    A("> Never log actual data values on output — log counts, paths, durations, status only.")
-    A("")
+    if _spark:
+        A("## Spark Pipeline Analysis")
+        A("")
+        op_counts = Counter(op.operation_type for cf in result.files for m in cf.methods
+                            for op in m.spark_operations if op.operation_type != "EXTERNAL_IO")
+        for op, n in op_counts.most_common():
+            A(f"- {op}: {n}")
+        A("")
+
+        A("## Spark Execution Boundaries")
+        A("")
+        A("Spark is lazily evaluated \u2014 transformations only run when an action "
+          "forces them. Log record-flow metrics **at the action**, carrying the "
+          "transformation's counts through.")
+        A("")
+        boundaries = [
+            (cf.path, m, op)
+            for cf in result.files for m in cf.methods for op in m.spark_operations
+            if op.lazy and op.materialized_at and op.materialized_at != op.line
+        ]
+        if boundaries:
+            A("| Transformation | Defined | Executes at |")
+            A("| --- | ---: | ---: |")
+            for pth, m, op in boundaries[:40]:
+                A(f"| {op.operation_type} in `{m.class_name}.{m.name}` | "
+                  f"{pth}:{op.line} | line {op.materialized_at} |")
+        else:
+            A("_No deferred transformation/action pairs detected._")
+        orphans = [
+            (cf.path, m, op)
+            for cf in result.files for m in cf.methods for op in m.spark_operations
+            if op.lazy and op.materialized_at is None
+            and op.operation_type not in ("SELECT", "WITH_COLUMN", "EXTERNAL_IO")
+        ]
+        if orphans:
+            A("")
+            A(f"\u26a0\ufe0f  {len(orphans)} transformation(s) with no Spark action in "
+              "the same method \u2014 confirm they are materialized downstream:")
+            for pth, m, op in orphans[:20]:
+                A(f"- {op.operation_type} at {pth}:{op.line} in `{m.class_name}.{m.name}`")
+        A("")
+
+        A("## Parquet Output Analysis")
+        A("")
+        writes = [f for f in result.findings if f.category in ("DATASET_WRITE", "PARQUET_WRITE")]
+        A(f"- Output findings: {len(writes)}")
+        for f in writes:
+            A(f"  - {f.file}:{f.line} \u2014 {f.logging_quality}")
+        A("")
+        A("> Never log actual data values on output \u2014 log counts, paths, "
+          "durations, status only.")
+        A("")
+
 
     A("## Exception Handling Analysis")
     A("")
