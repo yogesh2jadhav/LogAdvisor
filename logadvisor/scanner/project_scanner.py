@@ -108,7 +108,10 @@ def scan_project(root: str, ignore_dirs: List[str]) -> Tuple[ProjectInfo, List[s
     haystack = build_text + "\n" + "\n".join(sample_sources)
 
     frameworks: List[str] = []
-    if re.search(r"org\.apache\.spark|SparkSession|JavaSparkContext|Dataset<Row>", haystack):
+    spark_version = _detect_spark_version(build_text)
+    if spark_version or re.search(
+        r"org\.apache\.spark|SparkSession|JavaSparkContext|JavaSparkContext|Dataset<Row>", haystack
+    ):
         frameworks.append("Apache Spark")
     if re.search(r"spark-sql|org\.apache\.spark\.sql", haystack):
         frameworks.append("Spark SQL")
@@ -117,10 +120,11 @@ def scan_project(root: str, ignore_dirs: List[str]) -> Tuple[ProjectInfo, List[s
         project_name=os.path.basename(root),
         path=root,
         language="Java",
+        project_type="java-spark" if "Apache Spark" in frameworks else "java",
         frameworks=frameworks,
         build_system=build_system,
         java_version=_detect_java_version(build_text),
-        spark_version=_detect_spark_version(build_text),
+        spark_version=spark_version,
         logging_frameworks=_detect_logging_frameworks(build_text, sample_sources),
         java_files=len(java_files),
         test_files=test_files,

@@ -77,7 +77,7 @@ def run_pass1(project_path: str, config: Config, log: Optional[Logger] = None,
 
     findings = RuleEngine().evaluate(files)
     log(f"findings_created {len(findings)}")
-    scores = compute_scores(files, findings)
+    scores = compute_scores(files, findings, info.project_type)
     log(f"ai_observability_score {scores.overall_score}")
     return Pass1(info, files, sources, findings, scores)
 

@@ -20,8 +20,9 @@ from typing import List, Optional, Tuple
 from ..models import CodeFile, ExceptionBoundary, Method
 from .dataflow import annotate as annotate_dataflow
 from .exception_detector import detect_exceptions
+from .io_detector import detect_io
 from .logging_detector import detect_logging
-from .spark_detector import detect_spark_operations
+from .spark_detector import detect_spark_operations, method_has_spark_context
 
 _JAVA_KEYWORDS_BEFORE_METHOD = {
     "if", "for", "while", "switch", "catch", "synchronized", "return", "new",
@@ -169,6 +170,7 @@ def parse_java_file(path: str, project_root: str) -> CodeFile:
     if m:
         cf.package = m.group(1)
     cf.imports = re.findall(r"^\s*import\s+(?:static\s+)?([\w.*]+)\s*;", masked, re.MULTILINE)
+    file_has_spark_import = any("org.apache.spark" in imp for imp in cf.imports)
 
     # ---- type declarations (with body spans) ------------------------------
     type_spans: List[Tuple[int, int, str]] = []
@@ -241,7 +243,10 @@ def parse_java_file(path: str, project_root: str) -> CodeFile:
         # so their base line must be the line of the '{', NOT the method name -
         # these differ whenever the signature spans multiple lines.
         body_line = _line_of(src, brace_open)
-        method.spark_operations = detect_spark_operations(body, masked_body, body_line)
+        spark_ctx = method_has_spark_context(masked_body, file_has_spark_import)
+        method.spark_operations = detect_spark_operations(body, masked_body, body_line, spark_ctx)
+        method.spark_operations += detect_io(body, masked_body, body_line)
+        method.spark_operations.sort(key=lambda o: o.line)
         method.logging_statements = detect_logging(body, masked_body, body_line)
         method.exception_boundaries = detect_exceptions(body, masked_body, body_line)
 

@@ -66,17 +66,17 @@ class Database:
         if row:
             pid = row["id"]
             self.conn.execute(
-                "UPDATE projects SET name=?, language=?, java_version=?, spark_version=?, "
-                "build_system=?, logging_framework=?, updated_at=? WHERE id=?",
-                (p.project_name, p.language, p.java_version, p.spark_version,
+                "UPDATE projects SET name=?, language=?, project_type=?, java_version=?, "
+                "spark_version=?, build_system=?, logging_framework=?, updated_at=? WHERE id=?",
+                (p.project_name, p.language, p.project_type, p.java_version, p.spark_version,
                  p.build_system, lf, now, pid),
             )
             return pid
         cur = self.conn.execute(
-            "INSERT INTO projects(name, path, language, java_version, spark_version, "
+            "INSERT INTO projects(name, path, language, project_type, java_version, spark_version, "
             "build_system, logging_framework, created_at, updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
-            (p.project_name, p.path, p.language, p.java_version, p.spark_version,
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (p.project_name, p.path, p.language, p.project_type, p.java_version, p.spark_version,
              p.build_system, lf, now, now),
         )
         return cur.lastrowid
@@ -305,25 +305,31 @@ class Database:
         without re-scanning the repository."""
         srow = self.conn.execute(
             "SELECT s.*, p.name AS p_name, p.path AS p_path, p.language AS p_lang, "
-            "p.java_version, p.spark_version, p.build_system, p.logging_framework "
+            "p.project_type AS p_type, p.java_version, p.spark_version, p.build_system, "
+            "p.logging_framework "
             "FROM scans s JOIN projects p ON s.project_id = p.id WHERE s.id = ?", (scan_id,),
         ).fetchone()
         if not srow:
             return None
 
+        project_type = srow["p_type"] or ("java-spark" if srow["spark_version"] else "java")
         project = ProjectInfo(
             project_name=srow["p_name"], path=srow["p_path"], language=srow["p_lang"] or "Java",
-            frameworks=["Apache Spark"] if srow["spark_version"] else [],
+            project_type=project_type,
+            frameworks=["Apache Spark"] if project_type == "java-spark" else [],
             build_system=srow["build_system"], java_version=srow["java_version"],
             spark_version=srow["spark_version"],
             logging_frameworks=[x.strip() for x in (srow["logging_framework"] or "").split(",") if x.strip()],
         )
 
         scrow = self.conn.execute("SELECT * FROM scores WHERE scan_id = ?", (scan_id,)).fetchone()
+        from ..scoring import _SPARK_ONLY_BUCKETS
         scores = Scores(**{k: scrow[k] for k in (
             "job_lifecycle", "input_visibility", "transformation_visibility", "join_visibility",
             "output_visibility", "exception_visibility", "structured_logging", "run_correlation",
             "overall_score")}) if scrow else Scores()
+        if project_type == "java":
+            scores.not_applicable = sorted(_SPARK_ONLY_BUCKETS)
 
         files: List[CodeFile] = []
         for frow in self.conn.execute(

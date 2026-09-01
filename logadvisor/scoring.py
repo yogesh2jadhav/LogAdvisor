@@ -35,8 +35,13 @@ _BUCKET = {
     "transformation_visibility": {"FILTER", "GROUP_BY", "AGGREGATION", "DEDUPLICATION",
                                   "MAP", "REPARTITION", "SELECT", "WITH_COLUMN", "SORT", "UNION"},
     "join_visibility": {"JOIN"},
-    "output_visibility": {"DATASET_WRITE", "PARQUET_WRITE"},
+    "output_visibility": {"DATASET_WRITE", "PARQUET_WRITE", "EXTERNAL_IO"},
     "exception_visibility": {"EXCEPTION"},
+}
+
+# buckets that only make sense for a Spark data pipeline
+_SPARK_ONLY_BUCKETS = {
+    "job_lifecycle", "input_visibility", "transformation_visibility", "join_visibility",
 }
 
 _RUN_ID_RE = re.compile(r"\b(run[_]?id|correlation[_]?id|trace[_]?id|jobId|job_id)\b", re.IGNORECASE)
@@ -76,8 +81,11 @@ def risk_level(findings: List[Finding]) -> str:
     return "LOW"
 
 
-def compute_scores(files: List[CodeFile], findings: List[Finding]) -> Scores:
+def compute_scores(files: List[CodeFile], findings: List[Finding],
+                   project_type: str = "java-spark") -> Scores:
     scores = Scores()
+    if project_type == "java":
+        scores.not_applicable = sorted(_SPARK_ONLY_BUCKETS)
 
     for bucket, cats in _BUCKET.items():
         relevant = [f for f in findings if f.category in cats]
@@ -104,7 +112,8 @@ def compute_scores(files: List[CodeFile], findings: List[Finding]) -> Scores:
     else:
         scores.run_correlation = 0.0
 
-    scores.overall_score = round(sum(
-        getattr(scores, k) for k in _WEIGHTS
-    ), 1)
+    applicable = [k for k in _WEIGHTS if k not in scores.not_applicable]
+    got = sum(getattr(scores, k) for k in applicable)
+    possible = sum(_WEIGHTS[k] for k in applicable)
+    scores.overall_score = round(100.0 * got / possible, 1) if possible else 0.0
     return scores

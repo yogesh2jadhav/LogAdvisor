@@ -14,6 +14,7 @@ class ProjectInfo:
     project_name: str
     path: str
     language: str = "Java"
+    project_type: str = "java-spark"   # "java-spark" | "java"
     frameworks: List[str] = field(default_factory=list)
     build_system: Optional[str] = None
     java_version: Optional[str] = None
@@ -165,6 +166,9 @@ class Scores:
     structured_logging: float = 0.0
     run_correlation: float = 0.0
     overall_score: float = 0.0
+    # buckets excluded from `overall_score` because they don't apply to this
+    # project (e.g. Spark data-flow buckets on a plain-Java project).
+    not_applicable: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

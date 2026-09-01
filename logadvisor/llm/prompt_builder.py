@@ -57,7 +57,7 @@ def build_prompt(project: ProjectInfo, cf: CodeFile, method: Method, finding: Fi
     ] or ["- none in this method"]
 
     return f"""Project: {project.project_name}
-Technology: {project.language} + {', '.join(project.frameworks) or 'Apache Spark'}
+Technology: {project.language}{(' + ' + ', '.join(project.frameworks)) if project.frameworks else ' (no Spark)'}
 Logging framework(s): {', '.join(project.logging_frameworks) or 'unknown'}
 
 File: {cf.path}
@@ -81,7 +81,7 @@ Deterministic finding:
       not in ("EXCEPTION", "JOB_START", "JOB_COMPLETION") else "runs where defined"
   )}
 
-Detected Spark operations in method: {', '.join(detected) or 'none'}
+Detected operations in method: {', '.join(detected) or 'none'}
 
 Existing logging in method:
 {chr(10).join(existing)}
