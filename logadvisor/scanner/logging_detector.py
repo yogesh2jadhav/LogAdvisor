@@ -41,7 +41,7 @@ def _logger_type(call_text: str) -> str:
 
 def detect_logging(body: str, masked_body: str, start_line: int) -> List[LoggingStatement]:
     stmts: List[LoggingStatement] = []
-    lines = body.splitlines()
+    lines = body.split("\n")  # keep index consistent with masked_body.count("\n")
     for m in _LOGGER_CALL_RE.finditer(masked_body):
         level = _LEVEL_MAP.get(m.group(1).lower(), "INFO")
         paren_open = masked_body.index("(", m.end() - 1)

@@ -80,7 +80,7 @@ def method_has_spark_context(masked_body: str, file_has_spark_import: bool) -> b
 def detect_spark_operations(body: str, masked_body: str, start_line: int,
                             spark_context: bool = True) -> List[SparkOperation]:
     ops: List[SparkOperation] = []
-    lines = body.splitlines()
+    lines = body.split("\n")  # keep index consistent with masked_body.count("\n")
 
     def add(op_type: str, priority: str, char_pos: int, source: str):
         rel_line = source.count("\n", 0, char_pos)
